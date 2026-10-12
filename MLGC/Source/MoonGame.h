@@ -102,6 +102,8 @@ private:
     RoomEnemies::Attack attack_;
     float weaponStrength_ = 0.0f;
     std::unique_ptr<RoomEnemies> enemies_;
+    // GameManager.SetGameSpeedForTime(0, 0.05) on each hit (the hit-stop): real time left.
+    float hitStop_ = 0.0f;
     int defaultLayer_ = 0;
 
     // This frame's pad, as the game's actions (ReadPad).

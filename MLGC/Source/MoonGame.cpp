@@ -333,6 +333,12 @@ void MoonGame::Update(float deltaTime)
             }
             return;
         }
+        // The hit-stop: time stands still (timeScale 0: his Update returns at once, the scaled
+        // clocks stop) for 0.05 s of real time.
+        if (hitStop_ > 0.0f) {
+            hitStop_ -= deltaTime;
+            return;
+        }
         UpdateHero(deltaTime);
         if (hero_ && hero_->stats.isDead) {
             // The game pauses while he dies; when it's over, a new run (the town isn't here yet).
@@ -346,7 +352,7 @@ void MoonGame::Update(float deltaTime)
             }
             return;
         }
-        if (enemies_) enemies_->Update(deltaTime);
+        if (enemies_ && enemies_->Update(deltaTime) > 0) hitStop_ = Constants::GetFloat("hitToEnemyEffectDuration");
 #ifdef MLGC_AUTOWALK
         static int enemyFrame = 0;
         if (enemies_ && hero_ && ++enemyFrame % 30 == 0) {

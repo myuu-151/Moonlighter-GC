@@ -39,7 +39,6 @@ RoomEnemies::RoomEnemies(const Data& data, const RoomFill& room, Vector2 roomPos
     // The art: BabySlimeArt/BabySlime's place and depth offset.
     Vector2 art;
     int depth = 0;
-    std::string deadSprite;
     for (const PrefabNode& n : prefab->nodes) {
         if (n.path == "BabySlimeArt" || n.path == "BabySlimeArt/BabySlime") art = art + Vector2{n.x, n.y};
         for (const Behaviour& b : n.behaviours)
@@ -71,9 +70,9 @@ RoomEnemies::~RoomEnemies()
     if (nav_ && PolyNav2D::current == &nav_->nav) PolyNav2D::current = nullptr;
 }
 
-void RoomEnemies::Update(float deltaTime)
+int RoomEnemies::Update(float deltaTime)
 {
-    if (enemies_.empty()) return;
+    if (enemies_.empty()) return 0;
     PolyNav2D::current = &nav_->nav;
     heroView_.position = hero_.position;
     heroView_.isDead = hero_.stats.isDead;
@@ -104,8 +103,9 @@ void RoomEnemies::Update(float deltaTime)
     const Weapon* w = hero_.weapon;
     if (!w || !w->hitboxActive) {
         hitThisSwing_.clear();
-        return;
+        return 0;
     }
+    int hits = 0;
     const Vector2 c = hero_.position + w->hitboxPosition + w->hitboxOffset;
     const Vector2 h{w->hitboxSize.x * 0.5f, w->hitboxSize.y * 0.5f};
     for (auto& e : enemies_) {
@@ -118,7 +118,9 @@ void RoomEnemies::Update(float deltaTime)
         // Weapon.OnMainAttackHit: the knockback, then the damage (doubled on the combo's last).
         e->PushBackwards(hero_.position, attack_.pushForce);
         e->DealDamageToEnemy(hero_.comboCounter == 3 ? attack_.strength * 2.0f : attack_.strength);
+        hits++;
     }
+    return hits;
 }
 
 std::vector<RoomEnemies::Shown> RoomEnemies::Visible() const

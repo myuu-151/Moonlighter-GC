@@ -5,8 +5,8 @@
 //
 // Will's hits: a swing hits each enemy its hitbox overlaps once (the hitbox's activation per
 // swing is WeaponCollisionDetection's new contact), with the weapon's strength plus his, doubled
-// on the third of a combo, and knocks it back. Not yet: the hit-stop (timeScale 0 for 0.05 s),
-// the damage numbers, drops.
+// on the third of a combo, and knocks it back; Update returns how many it hit (the caller's
+// hit-stop). Not yet: the damage numbers, drops.
 #pragma once
 
 #include <memory>
@@ -48,7 +48,7 @@ public:
     bool Empty() const { return enemies_.empty(); }
     size_t Count() const { return enemies_.size(); }
     const std::vector<std::unique_ptr<game::Enemy>>& Enemies() const { return enemies_; }
-    void Update(float deltaTime);
+    int Update(float deltaTime);
 
     // What to draw: each enemy still there, and the dead sprites left behind.
     struct Shown {
