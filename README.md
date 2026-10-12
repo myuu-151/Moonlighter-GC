@@ -5,9 +5,6 @@
 Moonlighter (Moonlighter-Recomp, the native reimplementation) on the Nintendo GameCube,
 built on the [Octave](https://github.com/myuu-151/Octave-libogc) engine.
 
-> **Early.** The reimplementation's dungeon generation is done and verified against the
-> real game; the GameCube project (`MLGC/`) doesn't exist yet. The builder makes and
-> checks the data and stops there.
 
 ## What you need
 
