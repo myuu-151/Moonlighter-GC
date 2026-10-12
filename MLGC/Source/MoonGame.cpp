@@ -1,15 +1,17 @@
 #include "MoonGame.h"
 
 #include <malloc.h>
+#include <ogc/pad.h>
 #include <ogc/system.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
-#include "Input/Input.h"
+#include "Engine.h"
 #include "Log.h"
 #include "game/Constants.h"
 #include "game/HoleColliders.h"
@@ -23,7 +25,7 @@ using namespace game;
 
 // A test build's line in Dolphin's log (OSReport). Only in AUTOTOUR builds, which run in
 // Dolphin: on a console SYS_Report overwrites the RTC counter (Octave's System_Dolphin.cpp).
-#if defined(MLGC_AUTOTOUR) || defined(MLGC_AUTOWALK)
+#if defined(MLGC_AUTOTOUR) || defined(MLGC_AUTOWALK) || defined(MLGC_PADLOG)
 #define TOUR_REPORT(...) SYS_Report(__VA_ARGS__)
 #else
 #define TOUR_REPORT(...) ((void)0)
@@ -244,20 +246,20 @@ void MoonGame::Update(float deltaTime)
         ReadPad();
         // Debug shortcuts while START is held (START alone is the game's pause).
         if (pad_.debug) {
-            if (INP_IsGamepadButtonJustDown(GAMEPAD_A, 0)) {
+            if (padPressed_ & PAD_BUTTON_A) {
                 level_ = (level_ + 1) % 3;
                 if (level_ == 0) session_.Start(++seed_);
                 NewFloor();
-            } else if (INP_IsGamepadButtonJustDown(GAMEPAD_R1, 0) || INP_IsGamepadButtonJustDown(GAMEPAD_L1, 0)) {
-                culture_ = INP_IsGamepadButtonJustDown(GAMEPAD_R1, 0) ? culture_ % 4 + 1 : (culture_ + 2) % 4 + 1;
+            } else if (padPressed_ & (PAD_TRIGGER_R | PAD_TRIGGER_L)) {
+                culture_ = (padPressed_ & PAD_TRIGGER_R) ? culture_ % 4 + 1 : (culture_ + 2) % 4 + 1;
                 level_ = 0;
                 session_.Start(seed_);
                 NewFloor();
-            } else if (INP_IsGamepadButtonJustDown(GAMEPAD_Y, 0)) {
+            } else if (padPressed_ & PAD_BUTTON_Y) {
                 level_ = 0;
                 session_.Start(++seed_);
                 NewFloor();
-            } else if (INP_IsGamepadButtonJustDown(GAMEPAD_Z, 0)) {
+            } else if (padPressed_ & PAD_TRIGGER_Z) {
                 widescreen_ = !widescreen_;
             }
             return;
@@ -270,15 +272,38 @@ void MoonGame::Update(float deltaTime)
     }
 }
 
+// The pads, as PAD_ScanPads would read them (CCGC's reader; Octave's input never resets a
+// port): a port with no controller is reset, or one plugged in late is never seen; a read
+// that failed on the way keeps the reading before.
+static void ReadPadStatus(PADStatus (&pads)[PAD_CHANMAX])
+{
+    static PADStatus last[PAD_CHANMAX] = {};
+    PAD_Read(pads);
+    uint32_t reset = 0;
+    for (int i = 0; i < PAD_CHANMAX; i++) {
+        if (pads[i].err == PAD_ERR_NO_CONTROLLER) reset |= PAD_CHAN0_BIT >> i;
+        else if (pads[i].err == PAD_ERR_TRANSFER || pads[i].err == PAD_ERR_NOT_READY) pads[i] = last[i];
+        last[i] = pads[i];
+    }
+    if (reset) PAD_Reset(reset);
+}
+
 // The pad as the game's actions (InputActionsManager's bindings, on a GameCube pad):
-//   stick: LeftStick (InControl's circular dead zone from 0.2, full at 0.9)
+//   stick or D-pad: LeftStick (InControl's circular dead zone from 0.2, full at 0.9)
 //   A Action1 (attack)    B Action2 (hold: pendant)    X Action3 (secondary)    Y Action4 (inventory)
 //   R LeftTrigger (roll)  L RightTrigger (potion)      Z the bumpers (swap weapons)
-//   START Start (pause)   D-pad down Select (map)
+//   START Start (pause)   C-stick Select (map)
 // Holding START makes the other buttons debug shortcuts instead (pad_.debug).
 void MoonGame::ReadPad()
 {
-    float x = INP_GetGamepadAxisValue(GAMEPAD_AXIS_LTHUMB_X, 0), y = INP_GetGamepadAxisValue(GAMEPAD_AXIS_LTHUMB_Y, 0);
+    PADStatus pads[PAD_CHANMAX];
+    ReadPadStatus(pads);
+    const PADStatus& p = pads[0];
+    const uint16_t held = p.err == PAD_ERR_NONE ? p.button : 0;
+    padPressed_ = held & static_cast<uint16_t>(~padHeld_);
+    padHeld_ = held;
+    // A GameCube stick reaches about 100 of its 127.
+    float x = p.err == PAD_ERR_NONE ? p.stickX / 100.0f : 0.0f, y = p.err == PAD_ERR_NONE ? p.stickY / 100.0f : 0.0f;
     float mag = std::sqrt(x * x + y * y);
     if (mag < 0.2f) {
         x = y = 0.0f;
@@ -287,23 +312,33 @@ void MoonGame::ReadPad()
         x *= k;
         y *= k;
     }
-    auto down = [](int b) { return INP_IsGamepadButtonDown(b, 0); };
-    auto pressed = [](int b) { return INP_IsGamepadButtonJustDown(b, 0); };
+    // The game binds the D-pad to the stick's directions too.
+    if (held & PAD_BUTTON_LEFT) x = -1.0f;
+    if (held & PAD_BUTTON_RIGHT) x = 1.0f;
+    if (held & PAD_BUTTON_UP) y = 1.0f;
+    if (held & PAD_BUTTON_DOWN) y = -1.0f;
     pad_.stick = {x, y};
-    pad_.action1 = pressed(GAMEPAD_A);
-    pad_.action2Held = down(GAMEPAD_B);
-    pad_.action3 = pressed(GAMEPAD_X);
-    pad_.action3Held = down(GAMEPAD_X);
-    pad_.action4 = pressed(GAMEPAD_Y);
-    pad_.leftTrigger = pressed(GAMEPAD_R1);
-    pad_.rightTrigger = pressed(GAMEPAD_L1);
-    pad_.bumper = pressed(GAMEPAD_Z);
-    pad_.select = pressed(GAMEPAD_DOWN);
+    const bool cstick = p.err == PAD_ERR_NONE && (std::abs(p.substickX) > 50 || std::abs(p.substickY) > 50);
+    pad_.select = cstick && !cstickHeld_;
+    cstickHeld_ = cstick;
+    pad_.action1 = padPressed_ & PAD_BUTTON_A;
+    pad_.action2Held = held & PAD_BUTTON_B;
+    pad_.action3 = padPressed_ & PAD_BUTTON_X;
+    pad_.action3Held = held & PAD_BUTTON_X;
+    pad_.action4 = padPressed_ & PAD_BUTTON_Y;
+    pad_.leftTrigger = padPressed_ & PAD_TRIGGER_R;
+    pad_.rightTrigger = padPressed_ & PAD_TRIGGER_L;
+    pad_.bumper = padPressed_ & PAD_TRIGGER_Z;
+#ifdef MLGC_PADLOG
+    static int padFrames = 0;
+    if (++padFrames % 60 == 0)
+        TOUR_REPORT("mlgc: pad err %d stick %d %d -> %.3f %.3f buttons %04x hero %.2f %.2f\n", p.err, p.stickX, p.stickY, x, y, held,
+                    hero_ ? hero_->position.x : 0.0f, hero_ ? hero_->position.y : 0.0f);
+#endif
     // START: a pause on release if nothing else was pressed while it was held.
     pad_.start = false;
-    if (down(GAMEPAD_START)) {
-        if (pressed(GAMEPAD_A) || pressed(GAMEPAD_B) || pressed(GAMEPAD_X) || pressed(GAMEPAD_Y) || pressed(GAMEPAD_Z) ||
-            pressed(GAMEPAD_L1) || pressed(GAMEPAD_R1))
+    if (held & PAD_BUTTON_START) {
+        if (padPressed_ & (PAD_BUTTON_A | PAD_BUTTON_B | PAD_BUTTON_X | PAD_BUTTON_Y | PAD_TRIGGER_Z | PAD_TRIGGER_L | PAD_TRIGGER_R))
             startCombo_ = true;
         pad_.debug = true;
     } else {

@@ -33,7 +33,7 @@ PROJECT = HERE / 'MLGC'
 DATA = PROJECT / 'Scripts' / 'Data'
 
 NAME = "Moonlighter"
-MAKER = 'Octave Engine'  # as the engine's default banner
+MAKER = 'DolphinWorks'
 DESCRIPTION = "Moonlighter for the GameCube"
 
 

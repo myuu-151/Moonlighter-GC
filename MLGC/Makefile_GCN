@@ -43,6 +43,10 @@ endif
 ifneq ($(AUTOWALK),)
 CFLAGS	+=	-DMLGC_AUTOWALK
 endif
+# PADLOG=1 (test builds): what the pad reads, in Dolphin's log every second.
+ifneq ($(PADLOG),)
+CFLAGS	+=	-DMLGC_PADLOG
+endif
 # GECKOLOG=1: the log, live over a USB Gecko (DolphinWorks' Debug console).
 ifneq ($(GECKOLOG),)
 CFLAGS	+=	-DOCT_GECKO_LOG=1

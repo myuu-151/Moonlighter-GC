@@ -2,9 +2,9 @@
 // the PC checks against the real game), shown a room at a time.
 //
 // The game's controls (ReadPad): the stick walks Will (the game's HeroMerchantController and
-// Animator; push into a door to go through it); A attack, R roll, X secondary, B pendant,
-// Y inventory, L potion, Z swap weapons, START pause, D-pad down map (what's ported so far
-// acts on them). Debug, holding START:
+// Animator; push into a door to go through it), the D-pad too; A attack, R roll, X secondary,
+// B pendant, Y inventory, L potion, Z swap weapons, START pause, C-stick map (what's ported so
+// far acts on them). Debug, holding START:
 //   + A      down to the next floor (after the third, the dungeon starts over)
 //   + L / R  the dungeon before / after (Golem, Forest, Desert, Tech)
 //   + Y      a new run (a new seed)
@@ -89,5 +89,6 @@ private:
         bool leftTrigger = false, rightTrigger = false, bumper = false, select = false, start = false;
         bool debug = false; // START held
     } pad_;
-    bool startCombo_ = false;
+    bool startCombo_ = false, cstickHeld_ = false;
+    uint16_t padHeld_ = 0, padPressed_ = 0; // pad 1's buttons, and this frame's new presses
 };

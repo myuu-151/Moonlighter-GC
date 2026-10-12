@@ -71,7 +71,7 @@ for when it is):
 
 | Button | Game action |
 |---|---|
-| Control stick | Walk (push into a door to go through it) |
+| Control stick / D-pad | Walk (push into a door to go through it) |
 | A | Attack |
 | R | Roll |
 | X | Secondary attack |
@@ -80,7 +80,7 @@ for when it is):
 | L | Potion |
 | Z | Swap weapons |
 | START | Pause |
-| D-pad down | Map |
+| C-stick | Map |
 
 Debug, holding START:
 
