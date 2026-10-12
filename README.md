@@ -63,8 +63,9 @@ and packs it with the data: `MLGC/Packaged/GameCube/MLGC.iso`. `make -f Makefile
 
 Dungeon floors, generated on the console by Moonlighter-Recomp's generator (the code its
 tests check against the real game, object by object and texture by texture), a room at a
-time, with Will walking them (his controller and Animator checked frame by frame against the
-game on the PC):
+time, with Will walking, rolling, falling into holes and attacking with the starting Broom
+Spear (his controller, his and the weapon's Animators checked frame by frame against the game
+on the PC):
 
 The game's controls on a GameCube pad (what's ported so far responds; the rest is mapped
 for when it is):

@@ -21,11 +21,14 @@ include $(DEVKITPPC)/gamecube_rules
 export OCTAVE ?= $(abspath $(CURDIR)/../../octave-libogc)
 export ML_REPO ?= $(abspath $(CURDIR)/../../moonlighter)
 export ML_SRC := $(ML_REPO)/recomp/src
+# Box2D 2.3.1 (Unity's 2D physics' engine; unity/PhysicsWorld), vendored in Moonlighter-Recomp.
+export ML_BOX2D := $(ML_REPO)/recomp/third_party/box2d
 
 TARGET		:=	MLGC
 BUILD		:=	Intermediate/GCN
 SOURCES		:=	Source Generated \
-				$(ML_SRC)/cs $(ML_SRC)/unity $(ML_SRC)/util $(ML_SRC)/game $(ML_SRC)/render
+				$(ML_SRC)/cs $(ML_SRC)/unity $(ML_SRC)/util $(ML_SRC)/game $(ML_SRC)/render \
+				$(addprefix $(ML_BOX2D)/Box2D/,Collision Collision/Shapes Common Dynamics Dynamics/Contacts Dynamics/Joints)
 OUTPUT_DIR	:=	$(CURDIR)/Build/GCN
 
 # -ffp-contract=off: no fused multiply-adds, so the float arithmetic rounds
@@ -93,6 +96,7 @@ export OFILES	:=	$(CPPFILES:.cpp=.o) $(CFILES:.c=.o)
 
 # The port's headers first: its game/ and render/ before Octave's own folders.
 export INCLUDE	:=	-I$(ML_SRC) \
+					-I$(ML_BOX2D) \
 					-I$(CURDIR)/Source \
 					-I$(OCTAVE)/Engine/Source \
 					-I$(OCTAVE)/Engine/Source/Engine \

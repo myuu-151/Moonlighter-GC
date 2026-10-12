@@ -77,8 +77,27 @@ bool MoonGame::Initialize()
     try {
         session_.Load();
         heroAnimator_ = unity::AnimatorController::FromJson(json::Parse(data_.Read("animators/hero_merchant.json")));
-        // A new game's roll: the starting ability's cooldown (the items, then they go).
-        abilityCooldown_ = Items::StartingAbilityCooldown(json::Parse(data_.Read("items.json")));
+        // A new game's roll: the starting ability's cooldown; its weapon (the items, then they go).
+        {
+            const json::Value items = json::Parse(data_.Read("items.json"));
+            abilityCooldown_ = Items::StartingAbilityCooldown(items);
+            if (const json::Value* save = items.Find("initialSave"))
+                if (const json::Value* equipped = save->Find("initialEquippedItems"))
+                    for (const json::Value& name : equipped->arr) {
+                        const json::Value* item = Items::Find(items, name.s);
+                        const json::Value* type = item ? item->Find("weaponType") : nullptr;
+                        if (!type || !weaponItem_.empty()) continue;
+                        weaponItem_ = name.s;
+                        weaponType_ = type->s;
+                        weaponArt_ = (*item)["inGameArtPrefabName"].s;
+                    }
+        }
+        if (!weaponArt_.empty()) {
+            // animators/<its prefab's name, snake case>.json (tools/extract/animators.py).
+            std::string file;
+            for (char ch : weaponArt_) file += ch == ' ' ? '_' : static_cast<char>(ch >= 'A' && ch <= 'Z' ? ch - 'A' + 'a' : ch);
+            weaponAnimator_ = unity::AnimatorController::FromJson(json::Parse(data_.Read("animators/" + file + ".json")));
+        }
         commonTiles_.Load(data_.Read("tiles/common.bin"));
         session_.Start(seed_);
         NewFloor();
@@ -114,7 +133,7 @@ void MoonGame::NewFloor()
     floor_ = session_.Generate(culture, level_);
     if (bank_.Folder() != std::string("sprites/") + Session::PackName(culture) + "/") {
         bank_.Load(data_, std::string("sprites/") + Session::PackName(culture) + "/",
-                   {"sprites/hero/", "sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
+                   {"sprites/hero/", "sprites/weapons/broom_spear/", "sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
     }
     SetUpHero();
     // Start in the floor's first room (the initial room).
@@ -140,9 +159,16 @@ void MoonGame::SetUpHero()
     hero_ = std::make_unique<HeroMerchantController>(heroAnimator_, s, physics_);
     hero_->currentPlayerMoveSpeed = Constants::GetFloat("kBaseSpeed");
     hero_->SetDirection(HeroMerchantController::Front);
+    // His weapon: its prefab (the items bundle's, in every pack) for the hitbox's defaults.
+    if (const Prefab* w = weaponArt_.empty() ? nullptr : PrefabLibrary::Find(weaponArt_, "items")) {
+        weapon_ = std::make_unique<Weapon>(weaponAnimator_, *w, WeaponTypeFromName(weaponType_));
+        hero_->weapon = weapon_.get();
+    } else if (!weaponArt_.empty()) {
+        LogError("mlgc: no %s prefab in the pack: %s can't attack", weaponArt_.c_str(), weaponItem_.c_str());
+    }
 }
 
-void MoonGame::EnterRoom(int cell, int from)
+void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
 {
     FreeRoomTextures();
     cell_ = cell;
@@ -154,9 +180,16 @@ void MoonGame::EnterRoom(int cell, int from)
     AddHoleColliders(*c.room, roomPos, physics_);
     if (hero_) {
         static const float kEntry[4][2] = {{0.0f, 100.0f}, {0.0f, -112.0f}, {-216.0f, 0.0f}, {216.0f, 0.0f}};
-        hero_->position = from >= 0 ? unity::Vector2{roomPos.x + kEntry[from][0], roomPos.y + kEntry[from][1]} : roomPos;
+        hero_->position = arrival ? *arrival
+                          : from >= 0 ? unity::Vector2{roomPos.x + kEntry[from][0], roomPos.y + kEntry[from][1]}
+                                      : roomPos;
         hero_->velX = hero_->velY = 0.0f;
         hero_->timePushingDoors = 0.0f;
+        // Where a fall puts him back: the door he came in by (TeleportHeroToLastDoorUsed), or in
+        // the floor's first room his last spot clear of holes.
+        hero_->roomIsInit = c.cave == floor_->dungeon->layout.initCaveRoom;
+        hero_->respawn = hero_->position;
+        hero_->lastHolesFreePosition = hero_->position;
     }
     const Culture rc = c.room->roomInfo->culture;
     if (!tiles_.count(rc)) Session::LoadTiles(data_, rc, level_, tiles_[rc]);
@@ -214,7 +247,7 @@ const MoonGame::GxTexture* MoonGame::SpriteTexture(const render::Sprite& s)
 
 
 // Free memory: the heap's free blocks and what the arena hasn't handed out yet.
-static unsigned FreeKb()
+[[maybe_unused]] static unsigned FreeKb()
 {
     const struct mallinfo info = mallinfo();
     return (unsigned(info.fordblks) + unsigned((char*)SYS_GetArena1Hi() - (char*)SYS_GetArena1Lo())) / 1024;
@@ -378,8 +411,10 @@ void MoonGame::UpdateHero(float deltaTime)
     HeroMerchantController::Input input;
     input.stick = {x, y};
     input.roll = pad_.leftTrigger;
+    input.attack = pad_.action1;
 #ifdef MLGC_AUTOWALK
-    input.roll = frame % 97 == 0; // and a roll now and then
+    input.roll = frame % 97 == 0;   // and a roll now and then,
+    input.attack = frame % 41 == 0; // and an attack
 #endif
     hero_->Update(deltaTime, input);
     if (!hero_->doorEntered) return;
@@ -394,7 +429,8 @@ void MoonGame::UpdateHero(float deltaTime)
             const PlacedCell& n = floor_->dungeon->cells[i];
             if (n.x == c.x + kStep[d][0] && n.y == c.y + kStep[d][1]) {
                 TOUR_REPORT("mlgc: through %s into room %d\n", door.c_str(), static_cast<int>(i));
-                EnterRoom(static_cast<int>(i), kOpposite[d]);
+                const DoorState& used = c.room->doors.doors[d];
+                EnterRoom(static_cast<int>(i), kOpposite[d], used.hasArrival ? &used.arrival : nullptr);
                 return;
             }
         }
@@ -419,6 +455,28 @@ bool MoonGame::HeroQuad(render::DrawQuad& q) const
     q.layer = defaultLayer_;
     q.order = 15000 + static_cast<int>((y + heroDepthOffset_) * 10.0f) * -1;
     q.sortY = y;
+    return true;
+}
+
+// The weapon's MainAttack/Art over him: at his origin (its prefab sits there), its
+// SpriteDepthOrderRender set over his (his order + 1 + overOffset 0), while the clips show it.
+bool MoonGame::WeaponQuad(const render::DrawQuad& hero, render::DrawQuad& q) const
+{
+    if (!weapon_ || !weapon_->artEnabled) return false;
+    const std::string* name = weapon_->Sprite();
+    const render::Sprite* s = name && !name->empty() ? bank_.Find(*name) : nullptr;
+    if (!s) return false;
+    const float x = hero_->position.x, y = hero_->position.y;
+    const float x0 = s->left, y0 = s->bottom;
+    const float x1 = x0 + static_cast<float>(s->width) * s->unitsPerPixel, y1 = y0 + static_cast<float>(s->height) * s->unitsPerPixel;
+    q.sprite = s;
+    q.x[0] = x + x0, q.y[0] = y + y0;
+    q.x[1] = x + x1, q.y[1] = y + y0;
+    q.x[2] = x + x1, q.y[2] = y + y1;
+    q.x[3] = x + x0, q.y[3] = y + y1;
+    q.layer = hero.layer;
+    q.order = hero.order + 1;
+    q.sortY = hero.sortY;
     return true;
 }
 
@@ -488,11 +546,15 @@ void MoonGame::Render(float width, float height)
     GX_SetColorUpdate(GX_TRUE);
     GX_SetAlphaUpdate(GX_FALSE);
 
-    // The room's quads in their order, Will slotted in where the same order puts him.
-    render::DrawQuad heroQuad;
+    // The room's quads in their order, Will (and his weapon just over him) slotted in where the
+    // same order puts him.
+    render::DrawQuad heroQuad, weaponQuad;
     bool heroPending = HeroQuad(heroQuad);
+    const bool weaponShown = heroPending && WeaponQuad(heroQuad, weaponQuad);
     auto drawHero = [&]() {
         if (const GxTexture* tex = SpriteTexture(*heroQuad.sprite)) DrawQuad(heroQuad, *tex);
+        if (weaponShown)
+            if (const GxTexture* tex = SpriteTexture(*weaponQuad.sprite)) DrawQuad(weaponQuad, *tex);
         heroPending = false;
     };
     for (const render::DrawQuad& q : room_.quads) {

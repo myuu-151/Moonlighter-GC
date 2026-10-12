@@ -22,6 +22,7 @@
 #include "game/Composite.h"
 #include "game/HeroMerchantController.h"
 #include "game/Session.h"
+#include "game/Weapon.h"
 #include "unity/Animator.h"
 #include "unity/Physics2D.h"
 #include "render/RoomDraw.h"
@@ -48,12 +49,14 @@ private:
     };
 
     void NewFloor();
-    // `from`: the side Will comes in by (0 north, 1 south, 2 west, 3 east), -1 the middle.
-    void EnterRoom(int cell, int from = -1);
+    // `from`: the side Will comes in by (0 north, 1 south, 2 west, 3 east), -1 the middle;
+    // `arrival`: where (the door he left by: its arrival point, in front of this room's door).
+    void EnterRoom(int cell, int from = -1, const unity::Vector2* arrival = nullptr);
     void SetUpHero();
     void ReadPad();
     void UpdateHero(float deltaTime);
     bool HeroQuad(render::DrawQuad& q) const;
+    bool WeaponQuad(const render::DrawQuad& hero, render::DrawQuad& q) const;
     void FreeRoomTextures();
     void FreeSpriteTextures();
     const GxTexture* SpriteTexture(const render::Sprite& sprite);
@@ -80,6 +83,11 @@ private:
     std::unique_ptr<game::HeroMerchantController> hero_;
     float heroDepthOffset_ = 0.0f; // his SpriteDepthOrderRender's offset
     float abilityCooldown_ = 0.0f; // the starting ability's (items.json)
+    // The starting weapon (items.json's first in initialEquippedItems with a weaponType: the
+    // Broom Spear): its item, controller and the Weapon he carries.
+    std::string weaponItem_, weaponArt_, weaponType_;
+    unity::AnimatorController weaponAnimator_;
+    std::unique_ptr<game::Weapon> weapon_;
     int defaultLayer_ = 0;
 
     // This frame's pad, as the game's actions (ReadPad).
