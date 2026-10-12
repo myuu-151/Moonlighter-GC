@@ -34,7 +34,7 @@ Documents/
 
 ## Building
 
-Double-click **`Build MLGC.bat`** (CCGC's builder): it checks each thing above, says how
+Double-click **`Build MLGC.bat`**: it checks each thing above, says how
 to fix what's missing, and builds with one button, in the background, at low priority.
 
 By hand, the data:
@@ -53,6 +53,6 @@ DLC's rooms.
 | Path | Contents |
 |---|---|
 | `Build MLGC.bat` | Starts the builder |
-| `tools/builder.py` | The builder window (CCGC's) |
+| `tools/builder.py` | The builder window |
 | `tools/make_data.py` | Makes the data from your Steam copy, with Moonlighter-Recomp's extractors |
 | `MLGC/` | The Octave project (to come) |
