@@ -90,6 +90,10 @@ bool MoonGame::Initialize()
                         weaponItem_ = name.s;
                         weaponType_ = type->s;
                         weaponArt_ = (*item)["inGameArtPrefabName"].s;
+                        // His strength with it (EquipmentStats: the item's added to his base 5),
+                        // and its knockback.
+                        if (const json::Value* stats = item->Find("stats")) weaponStrength_ = static_cast<float>((*stats)["strength"].AsDouble());
+                        attack_.pushForce = static_cast<float>((*item)["mainAttackPushBackwardsForce"].AsDouble());
                     }
         }
         if (!weaponArt_.empty()) {
@@ -99,6 +103,9 @@ bool MoonGame::Initialize()
             weaponAnimator_ = unity::AnimatorController::FromJson(json::Parse(data_.Read("animators/" + file + ".json")));
         }
         commonTiles_.Load(data_.Read("tiles/common.bin"));
+        babySlimeAnimator_ = unity::AnimatorController::FromJson(json::Parse(data_.Read("animators/BabySlime.json")));
+        enemyStats_ = json::Parse(data_.Read("enemy_stats.json"));
+        physicsSettings_.Load(json::Parse(data_.Read("physics2d.json")));
         session_.Start(seed_);
         NewFloor();
         return true;
@@ -133,13 +140,25 @@ void MoonGame::NewFloor()
     floor_ = session_.Generate(culture, level_);
     if (bank_.Folder() != std::string("sprites/") + Session::PackName(culture) + "/") {
         bank_.Load(data_, std::string("sprites/") + Session::PackName(culture) + "/",
-                   {"sprites/hero/", "sprites/weapons/broom_spear/", "sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
+                   {"sprites/hero/", "sprites/weapons/broom_spear/", "sprites/enemies/BabySlime/", "sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
     }
     SetUpHero();
     // Start in the floor's first room (the initial room).
     cell_ = 0;
     for (size_t i = 0; i < floor_->dungeon->cells.size(); i++)
         if (floor_->dungeon->cells[i].cave == floor_->dungeon->layout.initCaveRoom) cell_ = static_cast<int>(i);
+#ifdef MLGC_ENEMYROOM
+    // Test builds (ENEMYROOM=1): straight into the floor's first room with live enemies.
+    for (size_t i = 0; i < floor_->dungeon->cells.size(); i++) {
+        const RoomFill* r = floor_->dungeon->cells[i].room;
+        bool live = false;
+        for (const auto& e : r ? r->enemies : std::vector<std::pair<int, std::string>>{}) live |= RoomEnemies::Runs(e.second);
+        if (live) {
+            cell_ = static_cast<int>(i);
+            break;
+        }
+    }
+#endif
     EnterRoom(cell_);
 }
 
@@ -163,6 +182,8 @@ void MoonGame::SetUpHero()
     if (const Prefab* w = weaponArt_.empty() ? nullptr : PrefabLibrary::Find(weaponArt_, "items")) {
         weapon_ = std::make_unique<Weapon>(weaponAnimator_, *w, WeaponTypeFromName(weaponType_));
         hero_->weapon = weapon_.get();
+        hero_->stats.strength.Set(hero_->stats.strength.value + weaponStrength_);
+        attack_.strength = hero_->stats.strength.value;
     } else if (!weaponArt_.empty()) {
         LogError("mlgc: no %s prefab in the pack: %s can't attack", weaponArt_.c_str(), weaponItem_.c_str());
     }
@@ -175,6 +196,7 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
     const PlacedCell& c = floor_->dungeon->cells[static_cast<size_t>(cell)];
     const unity::Vector2 roomPos = RoomPosition(c.x, c.y);
     // The room's colliders, and Will inside the door he came through (or in the middle).
+    enemies_.reset();
     physics_.Clear();
     AddRoomColliders(RoomSceneTree(*c.room, roomPos), roomPos, physics_);
     AddHoleColliders(*c.room, roomPos, physics_);
@@ -190,6 +212,15 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
         hero_->roomIsInit = c.cave == floor_->dungeon->layout.initCaveRoom;
         hero_->respawn = hero_->position;
         hero_->lastHolesFreePosition = hero_->position;
+    }
+    // Its enemies the port runs (the others stay the room's still sprites).
+    if (hero_) {
+        RoomEnemies::Data d{&babySlimeAnimator_, &enemyStats_, &physicsSettings_};
+        enemies_ = std::make_unique<RoomEnemies>(d, *c.room, roomPos, physics_, *hero_, attack_, level_, culture_);
+        if (enemies_->Empty()) enemies_.reset();
+        else {
+            TOUR_REPORT("mlgc: %zu live enemies\n", enemies_->Count());
+        }
     }
     const Culture rc = c.room->roomInfo->culture;
     if (!tiles_.count(rc)) Session::LoadTiles(data_, rc, level_, tiles_[rc]);
@@ -208,6 +239,11 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
         std::vector<uint8_t>().swap(t.rgba);
     });
     GX_InvalidateTexAll();
+    // The live enemies are drawn as they move: their still copies go.
+    if (enemies_)
+        room_.quads.erase(std::remove_if(room_.quads.begin(), room_.quads.end(),
+                                         [](const render::DrawQuad& q) { return q.path.find("EnemySpawn/BabySlime(Clone)") != std::string::npos; }),
+                          room_.quads.end());
     char line[256];
     std::snprintf(line, sizeof line, "%s floor %d (seed %d)  room %d/%zu: %s  %zu objects%s", kCultureNames[culture_], level_ + 1, seed_, cell + 1,
                   floor_->dungeon->cells.size(), c.info->name.c_str(), room_.quads.size(), missing.empty() ? "" : "  (sprites missing)");
@@ -298,6 +334,17 @@ void MoonGame::Update(float deltaTime)
             return;
         }
         UpdateHero(deltaTime);
+        if (enemies_) enemies_->Update(deltaTime);
+#ifdef MLGC_AUTOWALK
+        static int enemyFrame = 0;
+        if (enemies_ && hero_ && ++enemyFrame % 30 == 0) {
+            TOUR_REPORT("mlgc: hp %.0f (shield %.0f)", hero_->stats.currentHealth.value, hero_->stats.shield.value);
+            for (const auto& e : enemies_->Enemies())
+                TOUR_REPORT("  [%.1f %.1f hp %.1f %s%s]", e->position().x, e->position().y, e->enemyStats.CurrentHealth(), e->sprite.c_str(),
+                            e->destroyed ? " gone" : "");
+            TOUR_REPORT("\n");
+        }
+#endif
     } catch (const std::exception& e) {
         LogError("mlgc: %s", e.what());
         TOUR_REPORT("mlgc: error %s\n", e.what());
@@ -562,23 +609,49 @@ void MoonGame::Render(float width, float height)
     GX_SetColorUpdate(GX_TRUE);
     GX_SetAlphaUpdate(GX_FALSE);
 
-    // The room's quads in their order, Will (and his weapon just over him) slotted in where the
-    // same order puts him.
+    // The room's quads in their order, the moving ones (Will, his weapon just over him, the
+    // enemies) slotted in where the same order puts them.
+    struct Moving {
+        render::DrawQuad q;
+        float flash = 0.0f;
+        GXColor tint{255, 255, 255, 255};
+    };
+    std::vector<Moving> moving;
     render::DrawQuad heroQuad, weaponQuad;
-    bool heroPending = HeroQuad(heroQuad);
-    const bool weaponShown = heroPending && WeaponQuad(heroQuad, weaponQuad);
-    auto drawHero = [&]() {
+    if (HeroQuad(heroQuad)) {
         // The damaged effect's flash: the health bar's red, or white (healthBarColor 232, 71, 71).
-        const GXColor tint = hero_->flashTinted ? GXColor{232, 71, 71, 255} : GXColor{255, 255, 255, 255};
-        if (const GxTexture* tex = SpriteTexture(*heroQuad.sprite)) DrawQuad(heroQuad, *tex, hero_->flashAmount, tint);
-        if (weaponShown)
-            if (const GxTexture* tex = SpriteTexture(*weaponQuad.sprite)) DrawQuad(weaponQuad, *tex);
-        heroPending = false;
+        moving.push_back({heroQuad, hero_->flashAmount, hero_->flashTinted ? GXColor{232, 71, 71, 255} : GXColor{255, 255, 255, 255}});
+        if (WeaponQuad(heroQuad, weaponQuad)) moving.push_back({weaponQuad});
+    }
+    if (enemies_)
+        for (const RoomEnemies::Shown& e : enemies_->Visible()) {
+            const render::Sprite* s = bank_.Find(*e.sprite);
+            if (!s) continue;
+            Moving m;
+            const float x0 = e.position.x + s->left, y0 = e.position.y + s->bottom;
+            const float x1 = x0 + static_cast<float>(s->width) * s->unitsPerPixel, y1 = y0 + static_cast<float>(s->height) * s->unitsPerPixel;
+            m.q.sprite = s;
+            m.q.x[0] = x0, m.q.y[0] = y0;
+            m.q.x[1] = x1, m.q.y[1] = y0;
+            m.q.x[2] = x1, m.q.y[2] = y1;
+            m.q.x[3] = x0, m.q.y[3] = y1;
+            m.q.layer = defaultLayer_;
+            m.q.order = e.order;
+            m.q.sortY = e.position.y;
+            m.flash = e.flash;
+            m.tint = GXColor{static_cast<u8>(e.color[0] * 255.0f), static_cast<u8>(e.color[1] * 255.0f), static_cast<u8>(e.color[2] * 255.0f), 255};
+            moving.push_back(m);
+        }
+    auto before = [](const render::DrawQuad& a, const render::DrawQuad& b) {
+        return a.layer != b.layer ? a.layer < b.layer : a.order != b.order ? a.order < b.order : a.sortY > b.sortY;
+    };
+    std::stable_sort(moving.begin(), moving.end(), [&](const Moving& a, const Moving& b) { return before(a.q, b.q); });
+    size_t next = 0;
+    auto drawMoving = [&](const Moving& m) {
+        if (const GxTexture* tex = SpriteTexture(*m.q.sprite)) DrawQuad(m.q, *tex, m.flash, m.tint);
     };
     for (const render::DrawQuad& q : room_.quads) {
-        if (heroPending && (heroQuad.layer != q.layer ? heroQuad.layer < q.layer
-                                                      : heroQuad.order != q.order ? heroQuad.order < q.order : heroQuad.sortY > q.sortY))
-            drawHero();
+        while (next < moving.size() && before(moving[next].q, q)) drawMoving(moving[next++]);
         const GxTexture* tex = nullptr;
         if (q.sprite) tex = SpriteTexture(*q.sprite);
         else {
@@ -587,5 +660,5 @@ void MoonGame::Render(float width, float height)
         }
         if (tex) DrawQuad(q, *tex);
     }
-    if (heroPending) drawHero();
+    while (next < moving.size()) drawMoving(moving[next++]);
 }

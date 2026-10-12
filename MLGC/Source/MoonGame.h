@@ -19,6 +19,7 @@
 #include <gccore.h>
 
 #include "DiscData.h"
+#include "RoomEnemies.h"
 #include "game/Composite.h"
 #include "game/HeroMerchantController.h"
 #include "game/Session.h"
@@ -89,6 +90,13 @@ private:
     std::string weaponItem_, weaponArt_, weaponType_;
     unity::AnimatorController weaponAnimator_;
     std::unique_ptr<game::Weapon> weapon_;
+    // The room's enemies (the ported ones), what they're made from, and Will's hits on them.
+    unity::AnimatorController babySlimeAnimator_;
+    json::Value enemyStats_;
+    unity::Physics2DSettings physicsSettings_;
+    RoomEnemies::Attack attack_;
+    float weaponStrength_ = 0.0f;
+    std::unique_ptr<RoomEnemies> enemies_;
     int defaultLayer_ = 0;
 
     // This frame's pad, as the game's actions (ReadPad).

@@ -50,6 +50,10 @@ endif
 ifneq ($(PADLOG),)
 CFLAGS	+=	-DMLGC_PADLOG
 endif
+# ENEMYROOM=1 (test builds): the floor starts in its first room with live enemies.
+ifneq ($(ENEMYROOM),)
+CFLAGS	+=	-DMLGC_ENEMYROOM
+endif
 # GECKOLOG=1: the log, live over a USB Gecko (DolphinWorks' Debug console).
 ifneq ($(GECKOLOG),)
 CFLAGS	+=	-DOCT_GECKO_LOG=1

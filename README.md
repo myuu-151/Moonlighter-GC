@@ -65,7 +65,9 @@ Dungeon floors, generated on the console by Moonlighter-Recomp's generator (the 
 tests check against the real game, object by object and texture by texture), a room at a
 time, with Will walking, rolling, falling into holes and attacking with the starting Broom
 Spear (his controller, his and the weapon's Animators checked frame by frame against the game
-on the PC):
+on the PC). The Golem dungeon's BabySlimes chase him through the rooms' PolyNav maps, hurt
+him on contact and die to his spear; he blinks and flashes when hurt. The other enemies are
+still their rooms' still sprites.
 
 The game's controls on a GameCube pad (what's ported so far responds; the rest is mapped
 for when it is):
