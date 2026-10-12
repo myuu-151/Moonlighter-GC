@@ -2,6 +2,11 @@
 
 # Moonlighter GC
 
+![ported](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/myuu-151/Moonlighter-Recomp/main/progress/badge.json)
+![verified](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/myuu-151/Moonlighter-Recomp/main/progress/badge_verified.json)
+
+(How much of the game's code Moonlighter-Recomp has ported, and verified against the real game: its README has the breakdown.)
+
 Moonlighter (Moonlighter-Recomp, the native reimplementation) on the Nintendo GameCube,
 built on the [Octave](https://github.com/myuu-151/Octave-libogc) engine.
 
