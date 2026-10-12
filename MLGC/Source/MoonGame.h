@@ -101,6 +101,7 @@ private:
     unity::Physics2DSettings physicsSettings_;
     RoomEnemies::Attack attack_;
     float weaponStrength_ = 0.0f;
+    game::HeroMerchantController::Potion startingPotion_;
     std::unique_ptr<RoomEnemies> enemies_;
     // GameManager.SetGameSpeedForTime(0, 0.05) on each hit (the hit-stop): real time left.
     float hitStop_ = 0.0f;

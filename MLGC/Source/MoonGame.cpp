@@ -86,6 +86,12 @@ bool MoonGame::Initialize()
                 if (const json::Value* equipped = save->Find("initialEquippedItems"))
                     for (const json::Value& name : equipped->arr) {
                         const json::Value* item = Items::Find(items, name.s);
+                        const json::Value* kind = item ? item->Find("$type") : nullptr;
+                        if (kind && kind->s == "ConsumableItemMaster" && (startingPotion_.item.empty() || startingPotion_.item == name.s)) {
+                            startingPotion_.item = name.s;
+                            startingPotion_.quantity++;
+                            startingPotion_.recovery = Constants::GetFloat((*item)["consumableEffectName"].s);
+                        }
                         const json::Value* type = item ? item->Find("weaponType") : nullptr;
                         if (!type || !weaponItem_.empty()) continue;
                         weaponItem_ = name.s;
@@ -217,6 +223,8 @@ void MoonGame::SetUpHero()
         weapon_ = std::make_unique<Weapon>(weaponAnimator_, *w, WeaponTypeFromName(weaponType_));
         hero_->weapon = weapon_.get();
         hero_->stats.strength.Set(hero_->stats.strength.value + weaponStrength_);
+        // The new game's potions: initialEquippedItems' consumables, stacked in the Potion slot.
+        hero_->potion = startingPotion_;
         attack_.strength = hero_->stats.strength.value;
     } else if (!weaponArt_.empty()) {
         LogError("mlgc: no %s prefab in the pack: %s can't attack", weaponArt_.c_str(), weaponItem_.c_str());
@@ -534,9 +542,11 @@ void MoonGame::UpdateHero(float deltaTime)
     input.stick = {x, y};
     input.roll = pad_.leftTrigger;
     input.attack = pad_.action1;
+    input.potion = pad_.rightTrigger; // (L: the game's potion hotkey)
 #ifdef MLGC_AUTOWALK
     input.roll = frame % 97 == 0;   // and a roll now and then,
     input.attack = frame % 41 == 0; // and an attack
+    input.potion = frame % 240 == 0; // and a potion
 #endif
     hero_->Update(deltaTime, input);
     if (!hero_->doorEntered) return;
@@ -671,6 +681,10 @@ void MoonGame::DrawHud(unity::Vector2 at)
     const float full = st.currentHealth.maxValue > 0.0f ? st.currentHealth.value / st.currentHealth.maxValue : 0.0f;
     DrawRect(left - 2.0f, top - height - 2.0f, left + width + 2.0f, top + 2.0f, GXColor{24, 18, 30, 220});
     DrawRect(left, top - height, left + width * std::max(0.0f, std::min(1.0f, full)), top, GXColor{232, 71, 71, 255});
+    // The potions: a green pip each, under the bar.
+    for (int i = 0; i < hero_->potion.quantity; i++)
+        DrawRect(left + static_cast<float>(i) * 9.0f, top - height - 10.0f, left + 6.0f + static_cast<float>(i) * 9.0f, top - height - 4.0f,
+                 GXColor{110, 220, 120, 255});
     for (int i = 0; i < static_cast<int>(st.shield.value); i++)
         DrawRect(left + width + 6.0f + static_cast<float>(i) * 9.0f, top - height, left + width + 12.0f + static_cast<float>(i) * 9.0f, top,
                  GXColor{120, 200, 255, 255});
