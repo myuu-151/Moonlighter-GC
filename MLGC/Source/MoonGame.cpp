@@ -334,6 +334,18 @@ void MoonGame::Update(float deltaTime)
             return;
         }
         UpdateHero(deltaTime);
+        if (hero_ && hero_->stats.isDead) {
+            // The game pauses while he dies; when it's over, a new run (the town isn't here yet).
+            if (hero_->deathAnimationEnded) {
+                hero_.reset();
+                weapon_.reset();
+                enemies_.reset();
+                level_ = 0;
+                session_.Start(++seed_);
+                NewFloor();
+            }
+            return;
+        }
         if (enemies_) enemies_->Update(deltaTime);
 #ifdef MLGC_AUTOWALK
         static int enemyFrame = 0;
