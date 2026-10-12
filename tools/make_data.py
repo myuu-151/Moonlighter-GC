@@ -58,7 +58,7 @@ def step(title, args):
 
 # What the disc needs, from build/game/ into the project's Scripts/Data (Octave's packager puts
 # the project's Scripts/ on the disc).
-RUNTIME_FILES = ('constants.json', 'details.json', 'generation_data_counts.json', 'bundle_assets.json')
+RUNTIME_FILES = ('constants.json', 'details.json', 'generation_data_counts.json', 'bundle_assets.json', 'items.json')
 RUNTIME_FOLDERS = ('packs', 'tiles', 'sprites', 'animators')
 
 
@@ -102,6 +102,7 @@ def main():
     step("the painted textures' tiles", [extract / 'tiles.py', '--game', game, '--out', WORK])
     step('the sprites', [extract / 'sprites.py', '--game', game, '--out', WORK])
     step("the hero's animator and sprites", [extract / 'animators.py', '--game', game, '--out', WORK])
+    step('the items', [extract / 'items.py', '--game', game, '--out', WORK])
     copy_into_project()
     print(f'-- done: {DATA}', flush=True)
 

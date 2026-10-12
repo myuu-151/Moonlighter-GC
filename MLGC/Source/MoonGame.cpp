@@ -12,6 +12,8 @@
 #include "Input/Input.h"
 #include "Log.h"
 #include "game/Constants.h"
+#include "game/HoleColliders.h"
+#include "game/Items.h"
 #include "game/Prefabs.h"
 #include "game/RoomPhysics.h"
 #include "game/RoomScene.h"
@@ -73,6 +75,8 @@ bool MoonGame::Initialize()
     try {
         session_.Load();
         heroAnimator_ = unity::AnimatorController::FromJson(json::Parse(data_.Read("animators/hero_merchant.json")));
+        // A new game's roll: the starting ability's cooldown (the items, then they go).
+        abilityCooldown_ = Items::StartingAbilityCooldown(json::Parse(data_.Read("items.json")));
         commonTiles_.Load(data_.Read("tiles/common.bin"));
         session_.Start(seed_);
         NewFloor();
@@ -125,7 +129,8 @@ void MoonGame::SetUpHero()
     if (hero_) return;
     const Prefab* p = PrefabLibrary::Find("HeroMerchant", "hero_merchant");
     if (!p) throw std::runtime_error("no HeroMerchant prefab in the pack");
-    const HeroMerchantController::Settings s = HeroMerchantController::SettingsFrom(*p);
+    HeroMerchantController::Settings s = HeroMerchantController::SettingsFrom(*p);
+    s.abilityCooldown = abilityCooldown_ > 0.0f ? abilityCooldown_ : 0.0f;
     heroDepthOffset_ = HeroMerchantController::DepthOffset(*p);
     const std::vector<std::string>& layers = PrefabLibrary::SortingLayers();
     for (size_t i = 0; i < layers.size(); i++)
@@ -144,6 +149,7 @@ void MoonGame::EnterRoom(int cell, int from)
     // The room's colliders, and Will inside the door he came through (or in the middle).
     physics_.Clear();
     AddRoomColliders(RoomSceneTree(*c.room, roomPos), roomPos, physics_);
+    AddHoleColliders(*c.room, roomPos, physics_);
     if (hero_) {
         static const float kEntry[4][2] = {{0.0f, 100.0f}, {0.0f, -112.0f}, {-216.0f, 0.0f}, {216.0f, 0.0f}};
         hero_->position = from >= 0 ? unity::Vector2{roomPos.x + kEntry[from][0], roomPos.y + kEntry[from][1]} : roomPos;
@@ -235,23 +241,28 @@ void MoonGame::Update(float deltaTime)
         }
         return;
 #endif
-        UpdateHero(deltaTime);
-        if (INP_IsGamepadButtonJustDown(GAMEPAD_A, 0)) {
-            level_ = (level_ + 1) % 3;
-            if (level_ == 0) session_.Start(++seed_);
-            NewFloor();
-        } else if (INP_IsGamepadButtonJustDown(GAMEPAD_R1, 0) || INP_IsGamepadButtonJustDown(GAMEPAD_L1, 0)) {
-            culture_ = INP_IsGamepadButtonJustDown(GAMEPAD_R1, 0) ? culture_ % 4 + 1 : (culture_ + 2) % 4 + 1;
-            level_ = 0;
-            session_.Start(seed_);
-            NewFloor();
-        } else if (INP_IsGamepadButtonJustDown(GAMEPAD_Z, 0)) {
-            widescreen_ = !widescreen_;
-        } else if (INP_IsGamepadButtonJustDown(GAMEPAD_START, 0)) {
-            level_ = 0;
-            session_.Start(++seed_);
-            NewFloor();
+        ReadPad();
+        // Debug shortcuts while START is held (START alone is the game's pause).
+        if (pad_.debug) {
+            if (INP_IsGamepadButtonJustDown(GAMEPAD_A, 0)) {
+                level_ = (level_ + 1) % 3;
+                if (level_ == 0) session_.Start(++seed_);
+                NewFloor();
+            } else if (INP_IsGamepadButtonJustDown(GAMEPAD_R1, 0) || INP_IsGamepadButtonJustDown(GAMEPAD_L1, 0)) {
+                culture_ = INP_IsGamepadButtonJustDown(GAMEPAD_R1, 0) ? culture_ % 4 + 1 : (culture_ + 2) % 4 + 1;
+                level_ = 0;
+                session_.Start(seed_);
+                NewFloor();
+            } else if (INP_IsGamepadButtonJustDown(GAMEPAD_Y, 0)) {
+                level_ = 0;
+                session_.Start(++seed_);
+                NewFloor();
+            } else if (INP_IsGamepadButtonJustDown(GAMEPAD_Z, 0)) {
+                widescreen_ = !widescreen_;
+            }
+            return;
         }
+        UpdateHero(deltaTime);
     } catch (const std::exception& e) {
         LogError("mlgc: %s", e.what());
         TOUR_REPORT("mlgc: error %s\n", e.what());
@@ -259,11 +270,14 @@ void MoonGame::Update(float deltaTime)
     }
 }
 
-// The stick as InControl gives it to the game (a circular dead zone from 0.2, full at 0.9),
-// or the D-pad; then the controller's frame, and the door he pushed through.
-void MoonGame::UpdateHero(float deltaTime)
+// The pad as the game's actions (InputActionsManager's bindings, on a GameCube pad):
+//   stick: LeftStick (InControl's circular dead zone from 0.2, full at 0.9)
+//   A Action1 (attack)    B Action2 (hold: pendant)    X Action3 (secondary)    Y Action4 (inventory)
+//   R LeftTrigger (roll)  L RightTrigger (potion)      Z the bumpers (swap weapons)
+//   START Start (pause)   D-pad down Select (map)
+// Holding START makes the other buttons debug shortcuts instead (pad_.debug).
+void MoonGame::ReadPad()
 {
-    if (!hero_) return;
     float x = INP_GetGamepadAxisValue(GAMEPAD_AXIS_LTHUMB_X, 0), y = INP_GetGamepadAxisValue(GAMEPAD_AXIS_LTHUMB_Y, 0);
     float mag = std::sqrt(x * x + y * y);
     if (mag < 0.2f) {
@@ -273,10 +287,37 @@ void MoonGame::UpdateHero(float deltaTime)
         x *= k;
         y *= k;
     }
-    if (INP_IsGamepadButtonDown(GAMEPAD_LEFT, 0)) x = -1.0f;
-    if (INP_IsGamepadButtonDown(GAMEPAD_RIGHT, 0)) x = 1.0f;
-    if (INP_IsGamepadButtonDown(GAMEPAD_UP, 0)) y = 1.0f;
-    if (INP_IsGamepadButtonDown(GAMEPAD_DOWN, 0)) y = -1.0f;
+    auto down = [](int b) { return INP_IsGamepadButtonDown(b, 0); };
+    auto pressed = [](int b) { return INP_IsGamepadButtonJustDown(b, 0); };
+    pad_.stick = {x, y};
+    pad_.action1 = pressed(GAMEPAD_A);
+    pad_.action2Held = down(GAMEPAD_B);
+    pad_.action3 = pressed(GAMEPAD_X);
+    pad_.action3Held = down(GAMEPAD_X);
+    pad_.action4 = pressed(GAMEPAD_Y);
+    pad_.leftTrigger = pressed(GAMEPAD_R1);
+    pad_.rightTrigger = pressed(GAMEPAD_L1);
+    pad_.bumper = pressed(GAMEPAD_Z);
+    pad_.select = pressed(GAMEPAD_DOWN);
+    // START: a pause on release if nothing else was pressed while it was held.
+    pad_.start = false;
+    if (down(GAMEPAD_START)) {
+        if (pressed(GAMEPAD_A) || pressed(GAMEPAD_B) || pressed(GAMEPAD_X) || pressed(GAMEPAD_Y) || pressed(GAMEPAD_Z) ||
+            pressed(GAMEPAD_L1) || pressed(GAMEPAD_R1))
+            startCombo_ = true;
+        pad_.debug = true;
+    } else {
+        if (pad_.debug && !startCombo_) pad_.start = true;
+        pad_.debug = false;
+        startCombo_ = false;
+    }
+}
+
+// The controller's frame from the pad, and the door he pushed through.
+void MoonGame::UpdateHero(float deltaTime)
+{
+    if (!hero_) return;
+    float x = pad_.stick.x, y = pad_.stick.y;
 #ifdef MLGC_AUTOWALK
     // Test builds: right (from the middle: through the east door if there's one), up, left,
     // down, a diagonal, idle; again and again.
@@ -299,7 +340,13 @@ void MoonGame::UpdateHero(float deltaTime)
                     sprite ? sprite->c_str() : "-");
     }
 #endif
-    hero_->Update(deltaTime, unity::Vector2{x, y});
+    HeroMerchantController::Input input;
+    input.stick = {x, y};
+    input.roll = pad_.leftTrigger;
+#ifdef MLGC_AUTOWALK
+    input.roll = frame % 97 == 0; // and a roll now and then
+#endif
+    hero_->Update(deltaTime, input);
     if (!hero_->doorEntered) return;
     // DungeonDoor.OnPlayerEnter: into the next room, in by its opposite door.
     const std::string& door = hero_->doorEntered->path;

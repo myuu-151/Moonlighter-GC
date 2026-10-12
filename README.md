@@ -66,12 +66,29 @@ tests check against the real game, object by object and texture by texture), a r
 time, with Will walking them (his controller and Animator checked frame by frame against the
 game on the PC):
 
+The game's controls on a GameCube pad (what's ported so far responds; the rest is mapped
+for when it is):
+
+| Button | Game action |
+|---|---|
+| Control stick | Walk (push into a door to go through it) |
+| A | Attack |
+| R | Roll |
+| X | Secondary attack |
+| B (hold) | Merchant pendant |
+| Y | Inventory |
+| L | Potion |
+| Z | Swap weapons |
+| START | Pause |
+| D-pad down | Map |
+
+Debug, holding START:
+
 | Button | |
 |---|---|
-| Stick / D-pad | Will walks; push into a door to go through it |
 | A | Down to the next floor (after the third, a new run) |
 | L / R | The dungeon before / after (Golem, Forest, Desert, Tech) |
-| START | A new run (a new seed) |
+| Y | A new run (a new seed) |
 | Z | Full widescreen (16:9 TV) / letterboxed (4:3 TV) |
 
 ## Layout
