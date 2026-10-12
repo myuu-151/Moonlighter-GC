@@ -1,8 +1,7 @@
 # Moonlighter GC
 
 Moonlighter (Moonlighter-Recomp, the native reimplementation) on the Nintendo GameCube,
-built on the [Octave](https://github.com/myuu-151/Octave-libogc) engine. The same layout
-and builder as [Castle-Crashers-GC](https://github.com/myuu-151/Castle-Crashers-GC).
+built on the [Octave](https://github.com/myuu-151/Octave-libogc) engine.
 
 > **Early.** The reimplementation's dungeon generation is done and verified against the
 > real game; the GameCube project (`MLGC/`) doesn't exist yet. The builder makes and
