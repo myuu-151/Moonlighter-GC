@@ -66,7 +66,8 @@ tests check against the real game, object by object and texture by texture), a r
 time, with Will walking, rolling, falling into holes and attacking with the starting Broom
 Spear (his controller, his and the weapon's Animators checked frame by frame against the game
 on the PC). The Golem dungeon's BabySlimes chase him through the rooms' PolyNav maps, hurt
-him on contact and die to his spear; he blinks and flashes when hurt. The other enemies are
+him on contact and die to his spear; he blinks and flashes when hurt, and a bar at the top left
+shows his health (a stand-in until the game's HUD art is extracted). The other enemies are
 still their rooms' still sprites.
 
 The game's controls on a GameCube pad (what's ported so far responds; the rest is mapped
@@ -103,5 +104,5 @@ Debug, holding START:
 | `tools/make_data.py` | Makes the data from your Steam copy, with Moonlighter-Recomp's extractors |
 | `tools/make_art.py` | The disc banner (`MLGC/opening.bnr`) and the memory card save's icon and banner, from `art/` |
 | `art/` | The disc banner and the memory card banner (96 x 32), the memory card icon (32 x 32), and this page's banner |
-| `MLGC/Source/` | The GameCube side: `MoonGame` (floors, rooms, the pad), `DungeonView` (draws a room with GX), `DiscData` (the data on the disc), `Main.cpp` |
+| `MLGC/Source/` | The GameCube side: `MoonGame` (floors, rooms, the pad, Will, the HUD), `RoomEnemies` (the room's live enemies), `DungeonView` (draws a room with GX), `DiscData` (the data on the disc), `Main.cpp` |
 | `MLGC/Makefile_GCN` | Compiles these and Moonlighter-Recomp's `recomp/src` (`cs`, `unity`, `util`, `game`, `render`) |

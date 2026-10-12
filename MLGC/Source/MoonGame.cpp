@@ -560,6 +560,37 @@ void MoonGame::DrawQuad(const render::DrawQuad& q, const GxTexture& tex, float f
     if (flash > 0.0f) GX_SetNumTevStages(1);
 }
 
+void MoonGame::DrawRect(float x0, float y0, float x1, float y1, GXColor color)
+{
+    GX_SetNumTexGens(0);
+    GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORDNULL, GX_TEXMAP_NULL, GX_COLOR0A0);
+    GX_SetTevOp(GX_TEVSTAGE0, GX_PASSCLR);
+    GX_Begin(GX_QUADS, kFormat, 4);
+    const float xs[4] = {x0, x1, x1, x0}, ys[4] = {y0, y0, y1, y1};
+    for (int i = 0; i < 4; i++) {
+        GX_Position2f32(xs[i], ys[i]);
+        GX_Color4u8(color.r, color.g, color.b, color.a);
+        GX_TexCoord2f32(0.0f, 0.0f);
+    }
+    GX_End();
+    GX_SetNumTexGens(1);
+    GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
+    GX_SetTevOp(GX_TEVSTAGE0, GX_MODULATE);
+}
+
+void MoonGame::DrawHud(unity::Vector2 at)
+{
+    if (!hero_) return;
+    const HeroMerchantStats& st = hero_->stats;
+    const float left = at.x - 300.0f, top = at.y + 165.0f, width = 120.0f, height = 8.0f;
+    const float full = st.currentHealth.maxValue > 0.0f ? st.currentHealth.value / st.currentHealth.maxValue : 0.0f;
+    DrawRect(left - 2.0f, top - height - 2.0f, left + width + 2.0f, top + 2.0f, GXColor{24, 18, 30, 220});
+    DrawRect(left, top - height, left + width * std::max(0.0f, std::min(1.0f, full)), top, GXColor{232, 71, 71, 255});
+    for (int i = 0; i < static_cast<int>(st.shield.value); i++)
+        DrawRect(left + width + 6.0f + static_cast<float>(i) * 9.0f, top - height, left + width + 12.0f + static_cast<float>(i) * 9.0f, top,
+                 GXColor{120, 200, 255, 255});
+}
+
 void MoonGame::Render(float width, float height)
 {
     if (!floor_) return;
@@ -661,4 +692,5 @@ void MoonGame::Render(float width, float height)
         if (tex) DrawQuad(q, *tex);
     }
     while (next < moving.size()) drawMoving(moving[next++]);
+    DrawHud(at);
 }

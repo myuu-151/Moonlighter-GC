@@ -63,6 +63,11 @@ private:
     const GxTexture* SpriteTexture(const render::Sprite& sprite);
     // `flash` > 0: the sprite shader's _FlashAmount, towards `flashColor` (the damaged effect).
     void DrawQuad(const render::DrawQuad& q, const GxTexture& tex, float flash = 0.0f, GXColor flashColor = GXColor{255, 255, 255, 255});
+    // An untextured rectangle in world units (the HUD).
+    void DrawRect(float x0, float y0, float x1, float y1, GXColor color);
+    // Will's health, top left of the view: a stand-in for the game's HUD (its art isn't
+    // extracted yet): the bar in the health bar's red, a pip per shield.
+    void DrawHud(unity::Vector2 viewCenter);
 
     DiscData data_;
     game::Session session_{data_};
