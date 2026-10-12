@@ -63,11 +63,12 @@ and packs it with the data: `MLGC/Packaged/GameCube/MLGC.iso`. `make -f Makefile
 
 Dungeon floors, generated on the console by Moonlighter-Recomp's generator (the code its
 tests check against the real game, object by object and texture by texture), a room at a
-time:
+time, with Will walking them (his controller and Animator checked frame by frame against the
+game on the PC):
 
 | Button | |
 |---|---|
-| D-pad | Into the next room |
+| Stick / D-pad | Will walks; push into a door to go through it |
 | A | Down to the next floor (after the third, a new run) |
 | L / R | The dungeon before / after (Golem, Forest, Desert, Tech) |
 | START | A new run (a new seed) |

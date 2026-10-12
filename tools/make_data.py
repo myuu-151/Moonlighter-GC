@@ -10,7 +10,7 @@ ignores), for the disc.
 2. Extracts from it with Moonlighter-Recomp's tools/extract/, into build/game/: the
    Constants table, the room database, each dungeon's generation data and details
    registers, the asset bundles' index, the Wanderer DLC's rooms (if the DLC is installed),
-   the prefabs, the per-dungeon packs, the painted textures' tiles and the sprites.
+   the prefabs, the per-dungeon packs, the painted textures' tiles, the sprites and the hero's animator.
 3. Copies what the disc needs into MLGC/Scripts/Data (which git ignores), and makes the disc
    banner and the memory card art (tools/make_art.py).
 
@@ -59,7 +59,7 @@ def step(title, args):
 # What the disc needs, from build/game/ into the project's Scripts/Data (Octave's packager puts
 # the project's Scripts/ on the disc).
 RUNTIME_FILES = ('constants.json', 'details.json', 'generation_data_counts.json', 'bundle_assets.json')
-RUNTIME_FOLDERS = ('packs', 'tiles', 'sprites')
+RUNTIME_FOLDERS = ('packs', 'tiles', 'sprites', 'animators')
 
 
 def copy_into_project():
@@ -101,6 +101,7 @@ def main():
     step('the per-dungeon packs', [extract / 'packs.py', '--out', WORK])
     step("the painted textures' tiles", [extract / 'tiles.py', '--game', game, '--out', WORK])
     step('the sprites', [extract / 'sprites.py', '--game', game, '--out', WORK])
+    step("the hero's animator and sprites", [extract / 'animators.py', '--game', game, '--out', WORK])
     copy_into_project()
     print(f'-- done: {DATA}', flush=True)
 

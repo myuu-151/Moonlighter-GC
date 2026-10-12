@@ -38,6 +38,11 @@ CXXFLAGS	=	$(CFLAGS) -std=gnu++20
 ifneq ($(AUTOTOUR),)
 CFLAGS	+=	-DMLGC_AUTOTOUR=$(AUTOTOUR)
 endif
+# AUTOWALK=1 (test builds): Will walks a fixed stick script; his position, state and room go to
+# Dolphin's log.
+ifneq ($(AUTOWALK),)
+CFLAGS	+=	-DMLGC_AUTOWALK
+endif
 # GECKOLOG=1: the log, live over a USB Gecko (DolphinWorks' Debug console).
 ifneq ($(GECKOLOG),)
 CFLAGS	+=	-DOCT_GECKO_LOG=1

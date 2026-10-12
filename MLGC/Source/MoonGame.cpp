@@ -3,19 +3,25 @@
 #include <malloc.h>
 #include <ogc/system.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
 #include "Input/Input.h"
 #include "Log.h"
+#include "game/Constants.h"
+#include "game/Prefabs.h"
+#include "game/RoomPhysics.h"
 #include "game/RoomScene.h"
+#include "util/Json.h"
 
 using namespace game;
 
 // A test build's line in Dolphin's log (OSReport). Only in AUTOTOUR builds, which run in
 // Dolphin: on a console SYS_Report overwrites the RTC counter (Octave's System_Dolphin.cpp).
-#ifdef MLGC_AUTOTOUR
+#if defined(MLGC_AUTOTOUR) || defined(MLGC_AUTOWALK)
 #define TOUR_REPORT(...) SYS_Report(__VA_ARGS__)
 #else
 #define TOUR_REPORT(...) ((void)0)
@@ -66,6 +72,7 @@ bool MoonGame::Initialize()
 {
     try {
         session_.Load();
+        heroAnimator_ = unity::AnimatorController::FromJson(json::Parse(data_.Read("animators/hero_merchant.json")));
         commonTiles_.Load(data_.Read("tiles/common.bin"));
         session_.Start(seed_);
         NewFloor();
@@ -101,8 +108,9 @@ void MoonGame::NewFloor()
     floor_ = session_.Generate(culture, level_);
     if (bank_.Folder() != std::string("sprites/") + Session::PackName(culture) + "/") {
         bank_.Load(data_, std::string("sprites/") + Session::PackName(culture) + "/",
-                   {"sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
+                   {"sprites/hero/", "sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
     }
+    SetUpHero();
     // Start in the floor's first room (the initial room).
     cell_ = 0;
     for (size_t i = 0; i < floor_->dungeon->cells.size(); i++)
@@ -110,11 +118,38 @@ void MoonGame::NewFloor()
     EnterRoom(cell_);
 }
 
-void MoonGame::EnterRoom(int cell)
+// Will's settings from his prefab (hero_merchant's HeroMerchant, in every pack) and the
+// constants table; his Animator from animators/hero_merchant.json.
+void MoonGame::SetUpHero()
+{
+    if (hero_) return;
+    const Prefab* p = PrefabLibrary::Find("HeroMerchant", "hero_merchant");
+    if (!p) throw std::runtime_error("no HeroMerchant prefab in the pack");
+    const HeroMerchantController::Settings s = HeroMerchantController::SettingsFrom(*p);
+    heroDepthOffset_ = HeroMerchantController::DepthOffset(*p);
+    const std::vector<std::string>& layers = PrefabLibrary::SortingLayers();
+    for (size_t i = 0; i < layers.size(); i++)
+        if (layers[i] == "Default") defaultLayer_ = static_cast<int>(i);
+    hero_ = std::make_unique<HeroMerchantController>(heroAnimator_, s, physics_);
+    hero_->currentPlayerMoveSpeed = Constants::GetFloat("kBaseSpeed");
+    hero_->SetDirection(HeroMerchantController::Front);
+}
+
+void MoonGame::EnterRoom(int cell, int from)
 {
     FreeRoomTextures();
     cell_ = cell;
     const PlacedCell& c = floor_->dungeon->cells[static_cast<size_t>(cell)];
+    const unity::Vector2 roomPos = RoomPosition(c.x, c.y);
+    // The room's colliders, and Will inside the door he came through (or in the middle).
+    physics_.Clear();
+    AddRoomColliders(RoomSceneTree(*c.room, roomPos), roomPos, physics_);
+    if (hero_) {
+        static const float kEntry[4][2] = {{0.0f, 100.0f}, {0.0f, -112.0f}, {-216.0f, 0.0f}, {216.0f, 0.0f}};
+        hero_->position = from >= 0 ? unity::Vector2{roomPos.x + kEntry[from][0], roomPos.y + kEntry[from][1]} : roomPos;
+        hero_->velX = hero_->velY = 0.0f;
+        hero_->timePushingDoors = 0.0f;
+    }
     const Culture rc = c.room->roomInfo->culture;
     if (!tiles_.count(rc)) Session::LoadTiles(data_, rc, level_, tiles_[rc]);
     std::vector<std::string> missing;
@@ -177,7 +212,7 @@ static unsigned FreeKb()
     return (unsigned(info.fordblks) + unsigned((char*)SYS_GetArena1Hi() - (char*)SYS_GetArena1Lo())) / 1024;
 }
 
-void MoonGame::Update(float)
+void MoonGame::Update(float deltaTime)
 {
     if (!floor_) return;
     try {
@@ -200,21 +235,8 @@ void MoonGame::Update(float)
         }
         return;
 #endif
-        const PlacedCell& c = floor_->dungeon->cells[static_cast<size_t>(cell_)];
-        auto go = [&](int dx, int dy) {
-            for (size_t i = 0; i < floor_->dungeon->cells.size(); i++) {
-                const PlacedCell& n = floor_->dungeon->cells[i];
-                if (n.x == c.x + dx && n.y == c.y + dy) {
-                    EnterRoom(static_cast<int>(i));
-                    return;
-                }
-            }
-        };
-        if (INP_IsGamepadButtonJustDown(GAMEPAD_RIGHT, 0)) go(1, 0);
-        else if (INP_IsGamepadButtonJustDown(GAMEPAD_LEFT, 0)) go(-1, 0);
-        else if (INP_IsGamepadButtonJustDown(GAMEPAD_UP, 0)) go(0, 1);
-        else if (INP_IsGamepadButtonJustDown(GAMEPAD_DOWN, 0)) go(0, -1);
-        else if (INP_IsGamepadButtonJustDown(GAMEPAD_A, 0)) {
+        UpdateHero(deltaTime);
+        if (INP_IsGamepadButtonJustDown(GAMEPAD_A, 0)) {
             level_ = (level_ + 1) % 3;
             if (level_ == 0) session_.Start(++seed_);
             NewFloor();
@@ -235,6 +257,87 @@ void MoonGame::Update(float)
         TOUR_REPORT("mlgc: error %s\n", e.what());
         status_ = std::string("error: ") + e.what();
     }
+}
+
+// The stick as InControl gives it to the game (a circular dead zone from 0.2, full at 0.9),
+// or the D-pad; then the controller's frame, and the door he pushed through.
+void MoonGame::UpdateHero(float deltaTime)
+{
+    if (!hero_) return;
+    float x = INP_GetGamepadAxisValue(GAMEPAD_AXIS_LTHUMB_X, 0), y = INP_GetGamepadAxisValue(GAMEPAD_AXIS_LTHUMB_Y, 0);
+    float mag = std::sqrt(x * x + y * y);
+    if (mag < 0.2f) {
+        x = y = 0.0f;
+    } else {
+        float k = std::min((mag - 0.2f) / 0.7f, 1.0f) / mag;
+        x *= k;
+        y *= k;
+    }
+    if (INP_IsGamepadButtonDown(GAMEPAD_LEFT, 0)) x = -1.0f;
+    if (INP_IsGamepadButtonDown(GAMEPAD_RIGHT, 0)) x = 1.0f;
+    if (INP_IsGamepadButtonDown(GAMEPAD_UP, 0)) y = 1.0f;
+    if (INP_IsGamepadButtonDown(GAMEPAD_DOWN, 0)) y = -1.0f;
+#ifdef MLGC_AUTOWALK
+    // Test builds: right (from the middle: through the east door if there's one), up, left,
+    // down, a diagonal, idle; again and again.
+    static int frame = 0;
+    static const int kScript[][3] = {{240, 1, 0}, {70, 0, 1}, {160, -1, 0}, {140, 0, -1}, {60, 1, 1}, {30, 0, 0}};
+    int f = frame++ % 700;
+    for (const auto& seg : kScript) {
+        if (f < seg[0]) {
+            x = static_cast<float>(seg[1]) * (seg[2] ? 0.7071068f : 1.0f);
+            y = static_cast<float>(seg[2]) * (seg[1] ? 0.7071068f : 1.0f);
+            break;
+        }
+        f -= seg[0];
+    }
+    if (frame % 30 == 0) {
+        unity::AnimatorStateInfo info = hero_->animator.GetCurrentAnimatorStateInfo();
+        const std::string* sprite = hero_->animator.Sprite();
+        TOUR_REPORT("mlgc: walk %d room %d pos %.2f %.2f state %s t %.2f sprite %s\n", frame, cell_, hero_->position.x, hero_->position.y,
+                    heroAnimator_.states[static_cast<size_t>(hero_->animator.CurrentState())].name.c_str(), info.normalizedTime,
+                    sprite ? sprite->c_str() : "-");
+    }
+#endif
+    hero_->Update(deltaTime, unity::Vector2{x, y});
+    if (!hero_->doorEntered) return;
+    // DungeonDoor.OnPlayerEnter: into the next room, in by its opposite door.
+    const std::string& door = hero_->doorEntered->path;
+    static const char* const kDoors[4] = {"LevelDoorUp", "LevelDoorDown", "LevelDoorLeft", "LevelDoorRight"};
+    static const int kStep[4][2] = {{0, 1}, {0, -1}, {-1, 0}, {1, 0}}, kOpposite[4] = {1, 0, 3, 2};
+    const PlacedCell& c = floor_->dungeon->cells[static_cast<size_t>(cell_)];
+    for (int d = 0; d < 4; d++) {
+        if (door.find(kDoors[d]) == std::string::npos) continue;
+        for (size_t i = 0; i < floor_->dungeon->cells.size(); i++) {
+            const PlacedCell& n = floor_->dungeon->cells[i];
+            if (n.x == c.x + kStep[d][0] && n.y == c.y + kStep[d][1]) {
+                TOUR_REPORT("mlgc: through %s into room %d\n", door.c_str(), static_cast<int>(i));
+                EnterRoom(static_cast<int>(i), kOpposite[d]);
+                return;
+            }
+        }
+    }
+}
+
+// Will's sprite where he stands, ordered like SpriteDepthOrderRender orders it.
+bool MoonGame::HeroQuad(render::DrawQuad& q) const
+{
+    if (!hero_) return false;
+    const std::string* name = hero_->animator.Sprite();
+    const render::Sprite* s = name ? bank_.Find(*name) : nullptr;
+    if (!s) return false;
+    const float x = hero_->position.x, y = hero_->position.y;
+    const float x0 = s->left, y0 = s->bottom;
+    const float x1 = x0 + static_cast<float>(s->width) * s->unitsPerPixel, y1 = y0 + static_cast<float>(s->height) * s->unitsPerPixel;
+    q.sprite = s;
+    q.x[0] = x + x0, q.y[0] = y + y0;
+    q.x[1] = x + x1, q.y[1] = y + y0;
+    q.x[2] = x + x1, q.y[2] = y + y1;
+    q.x[3] = x + x0, q.y[3] = y + y1;
+    q.layer = defaultLayer_;
+    q.order = 15000 + static_cast<int>((y + heroDepthOffset_) * 10.0f) * -1;
+    q.sortY = y;
+    return true;
 }
 
 void MoonGame::DrawQuad(const render::DrawQuad& q, const GxTexture& tex)
@@ -303,7 +406,17 @@ void MoonGame::Render(float width, float height)
     GX_SetColorUpdate(GX_TRUE);
     GX_SetAlphaUpdate(GX_FALSE);
 
+    // The room's quads in their order, Will slotted in where the same order puts him.
+    render::DrawQuad heroQuad;
+    bool heroPending = HeroQuad(heroQuad);
+    auto drawHero = [&]() {
+        if (const GxTexture* tex = SpriteTexture(*heroQuad.sprite)) DrawQuad(heroQuad, *tex);
+        heroPending = false;
+    };
     for (const render::DrawQuad& q : room_.quads) {
+        if (heroPending && (heroQuad.layer != q.layer ? heroQuad.layer < q.layer
+                                                      : heroQuad.order != q.order ? heroQuad.order < q.order : heroQuad.sortY > q.sortY))
+            drawHero();
         const GxTexture* tex = nullptr;
         if (q.sprite) tex = SpriteTexture(*q.sprite);
         else {
@@ -312,4 +425,5 @@ void MoonGame::Render(float width, float height)
         }
         if (tex) DrawQuad(q, *tex);
     }
+    if (heroPending) drawHero();
 }
