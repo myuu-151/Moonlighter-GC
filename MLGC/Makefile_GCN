@@ -54,6 +54,10 @@ endif
 ifneq ($(ENEMYROOM),)
 CFLAGS	+=	-DMLGC_ENEMYROOM
 endif
+# ENDROOM=1 (test builds): the floor starts in its room with the next-level door, Will walking at it.
+ifneq ($(ENDROOM),)
+CFLAGS	+=	-DMLGC_ENDROOM
+endif
 # GECKOLOG=1: the log, live over a USB Gecko (DolphinWorks' Debug console).
 ifneq ($(GECKOLOG),)
 CFLAGS	+=	-DOCT_GECKO_LOG=1

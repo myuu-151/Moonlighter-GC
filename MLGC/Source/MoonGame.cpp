@@ -17,6 +17,7 @@
 #include "game/HoleColliders.h"
 #include "game/Items.h"
 #include "game/Prefabs.h"
+#include "game/RoomDoors.h"
 #include "game/RoomPhysics.h"
 #include "game/RoomScene.h"
 #include "util/Json.h"
@@ -25,7 +26,7 @@ using namespace game;
 
 // A test build's line in Dolphin's log (OSReport). Only in AUTOTOUR builds, which run in
 // Dolphin: on a console SYS_Report overwrites the RTC counter (Octave's System_Dolphin.cpp).
-#if defined(MLGC_AUTOTOUR) || defined(MLGC_AUTOWALK) || defined(MLGC_PADLOG)
+#if defined(MLGC_AUTOTOUR) || defined(MLGC_AUTOWALK) || defined(MLGC_PADLOG) || defined(MLGC_ENDROOM)
 #define TOUR_REPORT(...) SYS_Report(__VA_ARGS__)
 #else
 #define TOUR_REPORT(...) ((void)0)
@@ -161,7 +162,36 @@ void MoonGame::NewFloor()
         }
     }
 #endif
+#ifdef MLGC_ENDROOM
+    // Test builds (ENDROOM=1): into the floor's room with the next-level door, Will walking at it.
+    endDoorSide_ = -1;
+    for (size_t i = 0; i < floor_->dungeon->cells.size() && endDoorSide_ < 0; i++)
+        if (const RoomFill* r = floor_->dungeon->cells[i].room)
+            for (const auto& sd : r->specialDoors)
+                if (sd.prefab.find("NextLevelDoor") != std::string::npos) {
+                    cell_ = static_cast<int>(i);
+                    endDoorSide_ = sd.index;
+                }
+    TOUR_REPORT("mlgc: end room %d, its door on side %d\n", cell_, endDoorSide_);
+#endif
     EnterRoom(cell_);
+    // A floor past the first: in 64 from the init room's door (its DungeonLastLevelDoor), facing
+    // in, rolling (DungeonLoadingPanel.Disable).
+    if (level_ > 0 && hero_) {
+        const PlacedCell& c = floor_->dungeon->cells[static_cast<size_t>(cell_)];
+        for (const auto& sd : c.room->specialDoors) {
+            if (sd.index < 0 || sd.index > 3) continue;
+            static const float kInward[4][2] = {{0, -1}, {0, 1}, {1, 0}, {-1, 0}};
+            static const HeroMerchantController::Direction kFacing[4] = {HeroMerchantController::Front, HeroMerchantController::Back,
+                                                                          HeroMerchantController::Right, HeroMerchantController::Left};
+            const unity::Vector2 room = RoomPosition(c.x, c.y), door = kDoorPositions[sd.index];
+            hero_->TeleportTo({room.x + door.x + kInward[sd.index][0] * 64.0f, room.y + door.y + kInward[sd.index][1] * 64.0f});
+            hero_->respawn = hero_->position;
+            hero_->lastHolesFreePosition = hero_->position;
+            hero_->RollInto(kFacing[sd.index]);
+            break;
+        }
+    }
 }
 
 // Will's settings from his prefab (hero_merchant's HeroMerchant, in every pack) and the
@@ -458,6 +488,17 @@ void MoonGame::UpdateHero(float deltaTime)
 {
     if (!hero_) return;
     float x = pad_.stick.x, y = pad_.stick.y;
+#ifdef MLGC_ENDROOM
+    // Straight at the next-level door (north, south, west, east).
+    static const float kToward[4][2] = {{0, 1}, {0, -1}, {-1, 0}, {1, 0}};
+    if (endDoorSide_ >= 0) {
+        x = kToward[endDoorSide_][0];
+        y = kToward[endDoorSide_][1];
+    }
+    static int endFrame = 0;
+    if (++endFrame % 30 == 0)
+        TOUR_REPORT("mlgc: end walk room %d pos %.1f %.1f pushing %.2f\n", cell_, hero_->position.x, hero_->position.y, hero_->timePushingDoors);
+#endif
 #ifdef MLGC_AUTOWALK
     // Test builds: right (from the middle: through the east door if there's one), up, left,
     // down, a diagonal, idle; again and again.
