@@ -60,7 +60,8 @@ private:
     void FreeRoomTextures();
     void FreeSpriteTextures();
     const GxTexture* SpriteTexture(const render::Sprite& sprite);
-    void DrawQuad(const render::DrawQuad& q, const GxTexture& tex);
+    // `flash` > 0: the sprite shader's _FlashAmount, towards `flashColor` (the damaged effect).
+    void DrawQuad(const render::DrawQuad& q, const GxTexture& tex, float flash = 0.0f, GXColor flashColor = GXColor{255, 255, 255, 255});
 
     DiscData data_;
     game::Session session_{data_};

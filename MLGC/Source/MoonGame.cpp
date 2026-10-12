@@ -441,6 +441,7 @@ void MoonGame::UpdateHero(float deltaTime)
 bool MoonGame::HeroQuad(render::DrawQuad& q) const
 {
     if (!hero_) return false;
+    if (!hero_->artVisible) return false; // the invincibility blink
     const std::string* name = hero_->animator.Sprite();
     const render::Sprite* s = name ? bank_.Find(*name) : nullptr;
     if (!s) return false;
@@ -480,8 +481,22 @@ bool MoonGame::WeaponQuad(const render::DrawQuad& hero, render::DrawQuad& q) con
     return true;
 }
 
-void MoonGame::DrawQuad(const render::DrawQuad& q, const GxTexture& tex)
+void MoonGame::DrawQuad(const render::DrawQuad& q, const GxTexture& tex, float flash, GXColor flashColor)
 {
+    // The flash: a second stage lerps the sprite's colour towards flashColor (KONST) by the
+    // flash amount (C0), the alpha kept.
+    if (flash > 0.0f) {
+        const u8 f = static_cast<u8>(flash * 255.0f);
+        GX_SetNumTevStages(2);
+        GX_SetTevOrder(GX_TEVSTAGE1, GX_TEXCOORDNULL, GX_TEXMAP_NULL, GX_COLORNULL);
+        GX_SetTevKColor(GX_KCOLOR0, flashColor);
+        GX_SetTevKColorSel(GX_TEVSTAGE1, GX_TEV_KCSEL_K0);
+        GX_SetTevColor(GX_TEVREG0, GXColor{f, f, f, 255});
+        GX_SetTevColorIn(GX_TEVSTAGE1, GX_CC_CPREV, GX_CC_KONST, GX_CC_C0, GX_CC_ZERO);
+        GX_SetTevColorOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+        GX_SetTevAlphaIn(GX_TEVSTAGE1, GX_CA_ZERO, GX_CA_ZERO, GX_CA_ZERO, GX_CA_APREV);
+        GX_SetTevAlphaOp(GX_TEVSTAGE1, GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+    }
     if (tex.paletted) GX_LoadTlut(const_cast<GXTlutObj*>(&tex.tlut), GX_TLUT0);
     GX_LoadTexObj(const_cast<GXTexObj*>(&tex.obj), GX_TEXMAP0);
     const u8 r = static_cast<u8>(q.color[0] * 255.0f), g = static_cast<u8>(q.color[1] * 255.0f), b = static_cast<u8>(q.color[2] * 255.0f),
@@ -495,6 +510,7 @@ void MoonGame::DrawQuad(const render::DrawQuad& q, const GxTexture& tex)
         GX_TexCoord2f32(u[i], v[i]);
     }
     GX_End();
+    if (flash > 0.0f) GX_SetNumTevStages(1);
 }
 
 void MoonGame::Render(float width, float height)
@@ -552,7 +568,9 @@ void MoonGame::Render(float width, float height)
     bool heroPending = HeroQuad(heroQuad);
     const bool weaponShown = heroPending && WeaponQuad(heroQuad, weaponQuad);
     auto drawHero = [&]() {
-        if (const GxTexture* tex = SpriteTexture(*heroQuad.sprite)) DrawQuad(heroQuad, *tex);
+        // The damaged effect's flash: the health bar's red, or white (healthBarColor 232, 71, 71).
+        const GXColor tint = hero_->flashTinted ? GXColor{232, 71, 71, 255} : GXColor{255, 255, 255, 255};
+        if (const GxTexture* tex = SpriteTexture(*heroQuad.sprite)) DrawQuad(heroQuad, *tex, hero_->flashAmount, tint);
         if (weaponShown)
             if (const GxTexture* tex = SpriteTexture(*weaponQuad.sprite)) DrawQuad(weaponQuad, *tex);
         heroPending = false;
