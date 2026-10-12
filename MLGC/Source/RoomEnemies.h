@@ -1,4 +1,4 @@
-// The room's enemies on the GameCube: the ones the port has (BabySlimes) run as the game runs
+// The room's enemies on the GameCube: the ones the port has (BabySlime, GolemSoldier, Tangle) run as the game runs
 // them (game/Enemy.h's frame: the fixed steps with their bodies and attack triggers, DOTween,
 // the behaviours' Updates, the delayed calls, PolyNav, the Animators, the agents' moves),
 // against Will: their touch hurts him (DealDamageToPlayer) and his weapon's hitbox hurts them.
@@ -25,8 +25,10 @@
 
 class RoomEnemies {
 public:
+    // The enemies the port runs (the Golem dungeon's so far), their prefabs' names.
+    static constexpr const char* kPorted[3] = {"BabySlime", "GolemSoldier", "Tangle"};
     struct Data {
-        const unity::AnimatorController* babySlime = nullptr; // animators/BabySlime.json
+        const unity::AnimatorController* controllers[3] = {}; // animators/<name>.json, by kPorted
         const json::Value* enemyStats = nullptr;               // enemy_stats.json
         const unity::Physics2DSettings* physics = nullptr;      // physics2d.json
     };
@@ -37,7 +39,13 @@ public:
     };
 
     // An enemy prefab this runs (else the room's static sprite stands for it).
-    static bool Runs(const std::string& prefab) { return prefab == "BabySlime"; }
+    static int Ported(const std::string& prefab)
+    {
+        for (int i = 0; i < 3; i++)
+            if (prefab == kPorted[i]) return i;
+        return -1;
+    }
+    static bool Runs(const std::string& prefab) { return Ported(prefab) >= 0; }
 
     // `dead`: the spawn tiles of this room's enemies already killed (they stay dead). As the
     // room is entered (DungeonRoom.EnterRoom): the enemies appear after enemiesAppearDelay

@@ -2,8 +2,9 @@
 
 #include <algorithm>
 
-#include "game/BabySlime.h"
+#include "game/EnemyFactory.h"
 #include "game/EnemyStats.h"
+#include "game/Tangle.h"
 #include "game/Prefabs.h"
 #include "game/RoomScene.h"
 
@@ -16,9 +17,10 @@ RoomEnemies::RoomEnemies(const Data& data, const RoomFill& room, Vector2 roomPos
 {
     std::vector<std::pair<int, std::string>> spawns;
     for (const auto& s : room.enemies)
-        if (Runs(s.second) && std::find(dead.begin(), dead.end(), s.first) == dead.end()) spawns.push_back(s);
-    const Prefab* prefab = PrefabLibrary::Find("BabySlime", "enemies_golem");
-    if (spawns.empty() || !prefab || !data.babySlime) return;
+        if (Runs(s.second) && data.controllers[Ported(s.second)] && PrefabLibrary::Find(s.second, "enemies_golem") &&
+            std::find(dead.begin(), dead.end(), s.first) == dead.end())
+            spawns.push_back(s);
+    if (spawns.empty()) return;
 
     // The room's colliders (the rocks on their own Kinematic bodies), Will's body, the map.
     world_.AddColliders(roomColliders, 1 << unity::kLayerRisenObstacle);
@@ -36,25 +38,34 @@ RoomEnemies::RoomEnemies(const Data& data, const RoomFill& room, Vector2 roomPos
     scene_.hero = &heroView_;
     scene_.spawnEnemyDeadSprite = [this](const std::string& sprite, Vector2 at) { deadSprites_.emplace_back(sprite, at); };
 
-    // The art: BabySlimeArt/BabySlime's place and depth offset.
-    Vector2 art;
-    int depth = 0;
-    for (const PrefabNode& n : prefab->nodes) {
-        if (n.path == "BabySlimeArt" || n.path == "BabySlimeArt/BabySlime") art = art + Vector2{n.x, n.y};
-        for (const Behaviour& b : n.behaviours)
-            if (b.cls == "SpriteDepthOrderRender") depth = static_cast<int>(b.Field("offset"));
-    }
-
-    EnemyStatModificator m;
-    EnemyStatModificator::FromJson(*data.enemyStats, "BabySlime", m);
     EnemyStatsContext context;
     context.level = level;
     context.dungeonCulture = dungeonCulture;
+    // Enemy.enemyDeadSprite (the prefabs' field isn't extracted yet; their banks have the sprite).
+    static const char* const kDeadSprite[3] = {"deadenemy_slimes", "deadenemy_soldier", "deadenemy_tangle"};
     for (const auto& [tile, name] : spawns) {
+        const int kind = Ported(name);
+        const Prefab* prefab = PrefabLibrary::Find(name, "enemies_golem");
+        // The art: the SpriteRenderer's object (its place below the root) and its depth offset.
+        Vector2 art;
+        int depth = 0;
+        std::string artPath;
+        for (const PrefabNode& n : prefab->nodes)
+            if (artPath.empty() && n.HasRenderer() && !n.sprite.empty()) artPath = n.path;
+        for (const PrefabNode& n : prefab->nodes) {
+            if (n.path.empty() || artPath.compare(0, n.path.size(), n.path) != 0) continue;
+            if (n.path.size() != artPath.size() && artPath[n.path.size()] != '/') continue;
+            art = art + Vector2{n.x, n.y}; // each object on the way down to it
+            if (n.path == artPath)
+                for (const Behaviour& b : n.behaviours)
+                    if (b.cls == "SpriteDepthOrderRender") depth = static_cast<int>(b.Field("offset"));
+        }
+        EnemyStatModificator m;
+        EnemyStatModificator::FromJson(*data.enemyStats, name, m);
         // Under its EnemySpawn (at the tile), the room's enemy container, the room.
         const Vector2 at = TranslateTileToPosition(tile, room.gridSlicesX);
-        auto enemy = MakeEnemy(*prefab, scene_, data.babySlime, {at, {0.0f, 0.0f}, roomPosition});
-        enemy->enemyDeadSprite = "babyslime_dead";
+        auto enemy = MakeEnemy(*prefab, scene_, data.controllers[kind], {at, {0.0f, 0.0f}, roomPosition});
+        enemy->enemyDeadSprite = kDeadSprite[kind];
         enemy->Init(name, m, context);
         physics_->Add(*enemy);
         enemy->SetActive(false); // (DisableEnemies: until the room's EnableEnemies)
@@ -120,8 +131,14 @@ int RoomEnemies::Update(float deltaTime)
     for (auto& e : enemies_)
         if (!e->destroyed && e->active) e->UpdateAnimator(deltaTime);
     nav_->nav.LateUpdate();
-    for (auto& e : enemies_)
-        if (!e->destroyed && e->active) e->navAgent.LateUpdate(deltaTime);
+    // Each enemy's LateUpdate (the Tangle's weave: before its agent's, as the game ran them),
+    // then its agent's.
+    for (auto& e : enemies_) {
+        if (e->destroyed || !e->active) continue;
+        if (auto* tangle = dynamic_cast<TangleBehaviour*>(e->enemyBehaviour.get()))
+            if (tangle->enabled) tangle->LateUpdate(deltaTime);
+        e->navAgent.LateUpdate(deltaTime);
+    }
 
     // Will's swing: each enemy its hitbox overlaps, once a swing.
     const Weapon* w = hero_.weapon;

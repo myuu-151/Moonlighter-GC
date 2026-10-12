@@ -104,7 +104,9 @@ bool MoonGame::Initialize()
             weaponAnimator_ = unity::AnimatorController::FromJson(json::Parse(data_.Read("animators/" + file + ".json")));
         }
         commonTiles_.Load(data_.Read("tiles/common.bin"));
-        babySlimeAnimator_ = unity::AnimatorController::FromJson(json::Parse(data_.Read("animators/BabySlime.json")));
+        for (int i = 0; i < 3; i++)
+            enemyAnimators_[i] =
+                unity::AnimatorController::FromJson(json::Parse(data_.Read(std::string("animators/") + RoomEnemies::kPorted[i] + ".json")));
         enemyStats_ = json::Parse(data_.Read("enemy_stats.json"));
         physicsSettings_.Load(json::Parse(data_.Read("physics2d.json")));
         session_.Start(seed_);
@@ -143,7 +145,7 @@ void MoonGame::NewFloor()
     deadEnemies_.clear();
     if (bank_.Folder() != std::string("sprites/") + Session::PackName(culture) + "/") {
         bank_.Load(data_, std::string("sprites/") + Session::PackName(culture) + "/",
-                   {"sprites/hero/", "sprites/weapons/broom_spear/", "sprites/enemies/BabySlime/", "sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
+                   {"sprites/hero/", "sprites/weapons/broom_spear/", "sprites/enemies/BabySlime/", "sprites/enemies/GolemSoldier/", "sprites/enemies/Tangle/", "sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
     }
     SetUpHero();
     // Start in the floor's first room (the initial room).
@@ -252,7 +254,10 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
     }
     // Its enemies the port runs (the others stay the room's still sprites).
     if (hero_) {
-        RoomEnemies::Data d{&babySlimeAnimator_, &enemyStats_, &physicsSettings_};
+        RoomEnemies::Data d;
+        for (int i = 0; i < 3; i++) d.controllers[i] = &enemyAnimators_[i];
+        d.enemyStats = &enemyStats_;
+        d.physics = &physicsSettings_;
         enemies_ = std::make_unique<RoomEnemies>(d, *c.room, roomPos, physics_, *hero_, attack_, level_, culture_, deadEnemies_[cell]);
         if (enemies_->Empty()) enemies_.reset();
         else {
@@ -279,7 +284,11 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
     // The live enemies are drawn as they move: their still copies go.
     if (enemies_)
         room_.quads.erase(std::remove_if(room_.quads.begin(), room_.quads.end(),
-                                         [](const render::DrawQuad& q) { return q.path.find("EnemySpawn/BabySlime(Clone)") != std::string::npos; }),
+                                         [](const render::DrawQuad& q) {
+                                             for (const char* name : RoomEnemies::kPorted)
+                                                 if (q.path.find(std::string("EnemySpawn/") + name + "(Clone)") != std::string::npos) return true;
+                                             return false;
+                                         }),
                           room_.quads.end());
     char line[256];
     std::snprintf(line, sizeof line, "%s floor %d (seed %d)  room %d/%zu: %s  %zu objects%s", kCultureNames[culture_], level_ + 1, seed_, cell + 1,

@@ -96,7 +96,7 @@ private:
     unity::AnimatorController weaponAnimator_;
     std::unique_ptr<game::Weapon> weapon_;
     // The room's enemies (the ported ones), what they're made from, and Will's hits on them.
-    unity::AnimatorController babySlimeAnimator_;
+    unity::AnimatorController enemyAnimators_[3]; // by RoomEnemies::kPorted
     json::Value enemyStats_;
     unity::Physics2DSettings physicsSettings_;
     RoomEnemies::Attack attack_;

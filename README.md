@@ -70,8 +70,9 @@ Dungeon floors, generated on the console by Moonlighter-Recomp's generator (the 
 tests check against the real game, object by object and texture by texture), a room at a
 time, with Will walking, rolling, falling into holes and attacking with the starting Broom
 Spear (his controller, his and the weapon's Animators checked frame by frame against the game
-on the PC). The Golem dungeon's BabySlimes chase him through the rooms' PolyNav maps, hurt
-him on contact and die to his spear; he blinks and flashes when hurt, and a bar at the top left
+on the PC). The Golem dungeon's BabySlimes, GolemSoldiers and Tangles chase him through the
+rooms' PolyNav maps and fight him (the soldiers' sword swings from their clips' colliders)
+and die to his spear; he blinks and flashes when hurt, and a bar at the top left
 shows his health (a stand-in until the game's HUD art is extracted). The other enemies are
 still their rooms' still sprites.
 
