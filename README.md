@@ -52,4 +52,6 @@ DLC's rooms.
 | `Build MLGC.bat` | Starts the builder |
 | `tools/builder.py` | The builder window |
 | `tools/make_data.py` | Makes the data from your Steam copy, with Moonlighter-Recomp's extractors |
+| `tools/make_art.py` | The disc banner (`MLGC/opening.bnr`) and the memory card save's icon and banner, from `art/` |
+| `art/` | The disc banner and the memory card banner (96 x 32), the memory card icon (32 x 32), and this page's banner |
 | `MLGC/` | The Octave project (to come) |
