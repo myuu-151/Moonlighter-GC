@@ -1,3 +1,5 @@
+![MLGC](art/readme.png)
+
 # Moonlighter GC
 
 Moonlighter (Moonlighter-Recomp, the native reimplementation) on the Nintendo GameCube,

@@ -73,6 +73,7 @@ def main():
     step('indexing the asset bundles', [extract / 'bundle_index.py', '--game', game, '--out', WORK])
     step("the dungeons' details", [extract / 'details.py', '--game', game, '--out', WORK])
     step("the Wanderer DLC's rooms", [extract / 'wanderer_rooms.py', '--game', game, '--out', WORK])
+    step('the prefabs', [extract / 'prefabs.py', '--game', game, '--out', WORK])
     print(f'-- done: {WORK}', flush=True)
 
 
