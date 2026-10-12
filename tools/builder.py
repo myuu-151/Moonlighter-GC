@@ -475,7 +475,7 @@ class Builder:
     def run_build(self):
         ok = True
         recomp = Path(self.recomp.get())
-        if self.remake.get() or not (WORK / 'details.json').exists():
+        if self.remake.get() or not (PROJECT / 'Scripts' / 'Data' / 'sprites').exists():
             self.say('== Making the data from your copy of the game')
             self.lines.put(('phase', 'Making the data'))
             env = dict(os.environ, OCTAVE=self.octave.get(), ML_PROGRESS='1', PYTHONUNBUFFERED='1')

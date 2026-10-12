@@ -34,16 +34,44 @@ Documents/
 Double-click **`Build MLGC.bat`**: it checks each thing above, says how
 to fix what's missing, and builds with one button, in the background, at low priority.
 
-By hand, the data:
+### By hand
+
+**1. Make the data** from your copy of the game:
 
 ```
 python tools/make_data.py [--game <the game's folder>] [--recomp <Moonlighter-Recomp>]
 ```
 
 finds the game (`--game`, `ML_GAME`, else Steam app 606150), checks some of its files
-are the Steam copy's, and runs Moonlighter-Recomp's `tools/extract/` into `build/game/`
-(git-ignored): the asset bundles' index, the dungeons' details registers, the Wanderer
-DLC's rooms.
+are the Steam copy's, runs Moonlighter-Recomp's `tools/extract/` into `build/game/`, and
+copies what the disc needs into `MLGC/Scripts/Data/` (both git-ignored): the Constants
+table, each dungeon's rooms and prefabs, its sprites (GameCube textures, CI8 where 256
+colours do), the tiles the generator paints holes, slime and floor details from, and the
+disc banner and memory card art.
+
+**2. Build the disc** from the `octave-libogc` folder:
+
+```
+Octave.exe -headless -project <path to this repo>/MLGC/MLGC.octp -build GameCube
+```
+
+This compiles `MLGC/Source/` and Moonlighter-Recomp's `recomp/src/` with `MLGC/Makefile_GCN`
+and packs it with the data: `MLGC/Packaged/GameCube/MLGC.iso`. `make -f Makefile_GCN` in
+`MLGC/` compiles just the DOL.
+
+## What it does so far
+
+Dungeon floors, generated on the console by Moonlighter-Recomp's generator (the code its
+tests check against the real game, object by object and texture by texture), a room at a
+time:
+
+| Button | |
+|---|---|
+| D-pad | Into the next room |
+| A | Down to the next floor (after the third, a new run) |
+| L / R | The dungeon before / after (Golem, Forest, Desert, Tech) |
+| START | A new run (a new seed) |
+| Z | Full widescreen (16:9 TV) / letterboxed (4:3 TV) |
 
 ## Layout
 
@@ -54,4 +82,5 @@ DLC's rooms.
 | `tools/make_data.py` | Makes the data from your Steam copy, with Moonlighter-Recomp's extractors |
 | `tools/make_art.py` | The disc banner (`MLGC/opening.bnr`) and the memory card save's icon and banner, from `art/` |
 | `art/` | The disc banner and the memory card banner (96 x 32), the memory card icon (32 x 32), and this page's banner |
-| `MLGC/` | The Octave project (to come) |
+| `MLGC/Source/` | The GameCube side: `MoonGame` (floors, rooms, the pad), `DungeonView` (draws a room with GX), `DiscData` (the data on the disc), `Main.cpp` |
+| `MLGC/Makefile_GCN` | Compiles these and Moonlighter-Recomp's `recomp/src` (`cs`, `unity`, `util`, `game`, `render`) |

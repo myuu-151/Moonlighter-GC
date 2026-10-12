@@ -9,7 +9,10 @@ ignores), for the disc.
    both; this uses it.)
 2. Extracts from it with Moonlighter-Recomp's tools/extract/, into build/game/: the
    Constants table, the room database, each dungeon's generation data and details
-   registers, the asset bundles' index, the Wanderer DLC's rooms (if the DLC is installed).
+   registers, the asset bundles' index, the Wanderer DLC's rooms (if the DLC is installed),
+   the prefabs, the per-dungeon packs, the painted textures' tiles and the sprites.
+3. Copies what the disc needs into MLGC/Scripts/Data (which git ignores), and makes the disc
+   banner and the memory card art (tools/make_art.py).
 
 Nothing from the game is stored in this repository.
 """
@@ -20,6 +23,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parents[1]
 WORK = HERE / 'build' / 'game'
+DATA = HERE / 'MLGC' / 'Scripts' / 'Data'
 
 
 def recomp_folder(chosen=None):
@@ -52,6 +56,26 @@ def step(title, args):
                    creationflags=0x08000000 if sys.platform == 'win32' else 0)
 
 
+# What the disc needs, from build/game/ into the project's Scripts/Data (Octave's packager puts
+# the project's Scripts/ on the disc).
+RUNTIME_FILES = ('constants.json', 'details.json', 'generation_data_counts.json', 'bundle_assets.json')
+RUNTIME_FOLDERS = ('packs', 'tiles', 'sprites')
+
+
+def copy_into_project():
+    import shutil
+    print('-- into the project', flush=True)
+    for folder in RUNTIME_FOLDERS:
+        if (DATA / folder).exists():
+            shutil.rmtree(DATA / folder)
+        shutil.copytree(WORK / folder, DATA / folder)
+    for name in RUNTIME_FILES:
+        shutil.copy2(WORK / name, DATA / name)
+    step('the disc banner and memory card art', [HERE / 'tools' / 'make_art.py'])
+    total = sum(f.stat().st_size for f in DATA.rglob('*') if f.is_file())
+    print(f'   {DATA}: {total // (1024 * 1024)} MB', flush=True)
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Makes the data from your copy of Moonlighter.')
@@ -74,7 +98,11 @@ def main():
     step("the dungeons' details", [extract / 'details.py', '--game', game, '--out', WORK])
     step("the Wanderer DLC's rooms", [extract / 'wanderer_rooms.py', '--game', game, '--out', WORK])
     step('the prefabs', [extract / 'prefabs.py', '--game', game, '--out', WORK])
-    print(f'-- done: {WORK}', flush=True)
+    step('the per-dungeon packs', [extract / 'packs.py', '--out', WORK])
+    step("the painted textures' tiles", [extract / 'tiles.py', '--game', game, '--out', WORK])
+    step('the sprites', [extract / 'sprites.py', '--game', game, '--out', WORK])
+    copy_into_project()
+    print(f'-- done: {DATA}', flush=True)
 
 
 if __name__ == '__main__':

@@ -8,3 +8,5 @@ MLGC/Packaged/
 tools/.builder.json
 tools/.toolchain.json
 __pycache__/
+MLGC/Generated/
+MLGC/Makefile_TEMP
