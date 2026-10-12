@@ -1,0 +1,10 @@
+# Anything made from the game stays local (copyrighted)
+/build/
+MLGC/Scripts/Data/
+MLGC/Intermediate/
+MLGC/Build/
+MLGC/Packaged/
+# The builder's remembered folders
+tools/.builder.json
+tools/.toolchain.json
+__pycache__/
