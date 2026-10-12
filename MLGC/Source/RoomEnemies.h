@@ -39,14 +39,20 @@ public:
     // An enemy prefab this runs (else the room's static sprite stands for it).
     static bool Runs(const std::string& prefab) { return prefab == "BabySlime"; }
 
+    // `dead`: the spawn tiles of this room's enemies already killed (they stay dead). As the
+    // room is entered (DungeonRoom.EnterRoom): the enemies appear after enemiesAppearDelay
+    // (EnableEnemies) and go for Will a second after that.
     RoomEnemies(const Data& data, const game::RoomFill& room, unity::Vector2 roomPosition, const unity::Physics2D& roomColliders,
-                game::HeroMerchantController& hero, const Attack& attack, int level, int dungeonCulture);
+                game::HeroMerchantController& hero, const Attack& attack, int level, int dungeonCulture, const std::vector<int>& dead);
     ~RoomEnemies();
     RoomEnemies(const RoomEnemies&) = delete;
     RoomEnemies& operator=(const RoomEnemies&) = delete;
 
     bool Empty() const { return enemies_.empty(); }
     size_t Count() const { return enemies_.size(); }
+    // The spawn tiles of the enemies killed (to keep them dead), and whether any is left.
+    std::vector<int> DeadTiles() const;
+    bool AllDefeated() const;
     const std::vector<std::unique_ptr<game::Enemy>>& Enemies() const { return enemies_; }
     int Update(float deltaTime);
 
@@ -71,6 +77,7 @@ private:
     game::EnemyHero heroView_;
     game::EnemyScene scene_;
     std::vector<std::unique_ptr<game::Enemy>> enemies_;
+    std::vector<int> tiles_;       // per enemy: its spawn tile
     std::vector<int> depthOffset_; // per enemy: its art's SpriteDepthOrderRender.offset
     std::vector<unity::Vector2> artOffset_;
     std::vector<std::pair<std::string, unity::Vector2>> deadSprites_;

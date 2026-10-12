@@ -137,7 +137,9 @@ void MoonGame::NewFloor()
     // A floor's sprites and tiles: only this floor's are kept.
     FreeSpriteTextures();
     tiles_.clear();
+    enemies_.reset(); // (the last floor's: before its kills are forgotten)
     floor_ = session_.Generate(culture, level_);
+    deadEnemies_.clear();
     if (bank_.Folder() != std::string("sprites/") + Session::PackName(culture) + "/") {
         bank_.Load(data_, std::string("sprites/") + Session::PackName(culture) + "/",
                    {"sprites/hero/", "sprites/weapons/broom_spear/", "sprites/enemies/BabySlime/", "sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
@@ -196,6 +198,11 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
     const PlacedCell& c = floor_->dungeon->cells[static_cast<size_t>(cell)];
     const unity::Vector2 roomPos = RoomPosition(c.x, c.y);
     // The room's colliders, and Will inside the door he came through (or in the middle).
+    if (enemies_) {
+        std::vector<int>& dead = deadEnemies_[cell_];
+        for (int t : enemies_->DeadTiles())
+            if (std::find(dead.begin(), dead.end(), t) == dead.end()) dead.push_back(t);
+    }
     enemies_.reset();
     physics_.Clear();
     AddRoomColliders(RoomSceneTree(*c.room, roomPos), roomPos, physics_);
@@ -216,7 +223,7 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
     // Its enemies the port runs (the others stay the room's still sprites).
     if (hero_) {
         RoomEnemies::Data d{&babySlimeAnimator_, &enemyStats_, &physicsSettings_};
-        enemies_ = std::make_unique<RoomEnemies>(d, *c.room, roomPos, physics_, *hero_, attack_, level_, culture_);
+        enemies_ = std::make_unique<RoomEnemies>(d, *c.room, roomPos, physics_, *hero_, attack_, level_, culture_, deadEnemies_[cell]);
         if (enemies_->Empty()) enemies_.reset();
         else {
             TOUR_REPORT("mlgc: %zu live enemies\n", enemies_->Count());
@@ -485,6 +492,16 @@ void MoonGame::UpdateHero(float deltaTime)
     if (!hero_->doorEntered) return;
     // DungeonDoor.OnPlayerEnter: into the next room, in by its opposite door.
     const std::string& door = hero_->doorEntered->path;
+    // The next-level door (NextLevelDoor.OnPlayerEnter): down a floor once the room is clear
+    // (the enemies the port runs; HP and the rest carry over).
+    if (door.find("NextLevelDoor") != std::string::npos) {
+        if (!enemies_ || enemies_->AllDefeated()) {
+            TOUR_REPORT("mlgc: down to floor %d\n", level_ + 2);
+            level_ = std::min(level_ + 1, 2);
+            NewFloor();
+        }
+        return;
+    }
     static const char* const kDoors[4] = {"LevelDoorUp", "LevelDoorDown", "LevelDoorLeft", "LevelDoorRight"};
     static const int kStep[4][2] = {{0, 1}, {0, -1}, {-1, 0}, {1, 0}}, kOpposite[4] = {1, 0, 3, 2};
     const PlacedCell& c = floor_->dungeon->cells[static_cast<size_t>(cell_)];

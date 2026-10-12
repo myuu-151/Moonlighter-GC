@@ -11,12 +11,12 @@ using namespace game;
 using unity::Vector2;
 
 RoomEnemies::RoomEnemies(const Data& data, const RoomFill& room, Vector2 roomPosition, const unity::Physics2D& roomColliders,
-                         HeroMerchantController& hero, const Attack& attack, int level, int dungeonCulture)
+                         HeroMerchantController& hero, const Attack& attack, int level, int dungeonCulture, const std::vector<int>& dead)
     : hero_(hero), attack_(attack), world_(*data.physics)
 {
     std::vector<std::pair<int, std::string>> spawns;
     for (const auto& s : room.enemies)
-        if (Runs(s.second)) spawns.push_back(s);
+        if (Runs(s.second) && std::find(dead.begin(), dead.end(), s.first) == dead.end()) spawns.push_back(s);
     const Prefab* prefab = PrefabLibrary::Find("BabySlime", "enemies_golem");
     if (spawns.empty() || !prefab || !data.babySlime) return;
 
@@ -57,12 +57,36 @@ RoomEnemies::RoomEnemies(const Data& data, const RoomFill& room, Vector2 roomPos
         enemy->enemyDeadSprite = "babyslime_dead";
         enemy->Init(name, m, context);
         physics_->Add(*enemy);
-        // DungeonRoom.EnableEnemies as Will comes in: they start after a second.
-        enemy->enemyBehaviour->StartTargetingPlayerAfterTime(1.0f);
+        enemy->SetActive(false); // (DisableEnemies: until the room's EnableEnemies)
         enemies_.push_back(std::move(enemy));
+        tiles_.push_back(tile);
         depthOffset_.push_back(depth);
         artOffset_.push_back(art);
     }
+    // EnterRoom: Invoke("EnableEnemies", enemiesAppearDelay); each one SetActive(true) and
+    // StartTargetingPlayerAfterTime(1).
+    calls_.now = 0.0;
+    calls_.Invoke(this, "EnableEnemies", 0.5f, [this] {
+        for (auto& e : enemies_) {
+            e->SetActive(true);
+            e->enemyBehaviour->StartTargetingPlayerAfterTime(1.0f);
+        }
+    });
+}
+
+std::vector<int> RoomEnemies::DeadTiles() const
+{
+    std::vector<int> out;
+    for (size_t i = 0; i < enemies_.size(); i++)
+        if (enemies_[i]->destroyed || !enemies_[i]->enemyStats.isAlive()) out.push_back(tiles_[i]);
+    return out;
+}
+
+bool RoomEnemies::AllDefeated() const
+{
+    for (const auto& e : enemies_)
+        if (!e->destroyed && e->enemyStats.isAlive()) return false;
+    return true;
 }
 
 RoomEnemies::~RoomEnemies()

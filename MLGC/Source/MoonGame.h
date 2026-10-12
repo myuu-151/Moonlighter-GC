@@ -104,6 +104,8 @@ private:
     std::unique_ptr<RoomEnemies> enemies_;
     // GameManager.SetGameSpeedForTime(0, 0.05) on each hit (the hit-stop): real time left.
     float hitStop_ = 0.0f;
+    // The floor's killed enemies, by cell: their spawn tiles.
+    std::map<int, std::vector<int>> deadEnemies_;
     int defaultLayer_ = 0;
 
     // This frame's pad, as the game's actions (ReadPad).
