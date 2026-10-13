@@ -59,7 +59,7 @@ def msys(path):
 
 def find_devkitpro():
     for candidate in (os.environ.get('DEVKITPRO_WIN'), os.environ.get('DEVKITPRO'), r'C:\devkitPro',
-                      r'C:\gekko-toolchain'):
+                      r'C:\gekko-toolchain', r'C:\DolphinWorks\gekko-toolchain'):
         if not candidate:
             continue
         if candidate.startswith('/') and len(candidate) > 2 and candidate[2] == '/':
@@ -136,7 +136,7 @@ def find_toolchains():
     """Every toolchain there is: DEVKITPRO's, C:\\devkitPro, C:\\gekko-toolchain, and folders chosen before."""
     found = []
     for candidate in (os.environ.get('DEVKITPRO_WIN'), os.environ.get('DEVKITPRO'), r'C:\devkitPro',
-                      r'C:\gekko-toolchain', *toolchain_settings().get('folders', [])):
+                      r'C:\gekko-toolchain', r'C:\DolphinWorks\gekko-toolchain', *toolchain_settings().get('folders', [])):
         path = toolchain_path(candidate)
         if path and all(path.resolve() != other.resolve() for other in found):
             found.append(path)
@@ -155,7 +155,11 @@ class Builder:
             settings = json.loads(SETTINGS.read_text())
         except (OSError, ValueError):
             pass
-        self.octave = tk.StringVar(value=settings.get('octave', str(HERE.parent / 'octave-libogc')))
+        # Octave-libogc: the one chosen before, else beside this repo, else DolphinWorks' (C:\DolphinWorks).
+        default_octave = HERE.parent / 'octave-libogc'
+        if not default_octave.is_dir() and Path(r'C:\DolphinWorks\Octave-libogc').is_dir():
+            default_octave = Path(r'C:\DolphinWorks\Octave-libogc')
+        self.octave = tk.StringVar(value=settings.get('octave', str(default_octave)))
         self.recomp = tk.StringVar(value=settings.get('recomp', str(HERE.parent / 'moonlighter')))
         # the game's folder, if chosen (a depot download, say, which Steam doesn't list); else Steam's
         self.game_folder = tk.StringVar(value=settings.get('game', ''))
