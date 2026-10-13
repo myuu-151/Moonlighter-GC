@@ -6,7 +6,9 @@ It checks what the build needs (your copy of Moonlighter: Steam's, or a folder y
 choose, such as a depot download; Pillow and UnityPy, devkitPro, Octave-libogc,
 Moonlighter-Recomp) and says how to fix what's missing; then one button makes the data
 from your copy (tools/make_data.py) and packages the disc with Octave, and shows where
-the ISO is. Until the Octave project (MLGC/MLGC.octp) exists, the build stops after the
+the ISO is. "Translated game code" builds with TRANSLATED=1 (MLGC/Makefile_GCN: the game's
+own code translated from your copy by Moonlighter-Recomp's tools/translate, which needs
+the .NET 9 SDK). Until the Octave project (MLGC/MLGC.octp) exists, the build stops after the
 data. The folders it remembers in tools/.builder.json (not committed).
 
 Every step runs in the background, without a console window of its own; the
@@ -47,8 +49,11 @@ NOISE = re.compile(r'^(?:Asset (?:loaded|saved)|Unloading|Loading script|Cannot 
                    r'make: (?:Entering|Leaving)|\s*>>|\s*\d+ [Ff]ile\(s\) copied|The file cannot be copied|'
                    r'The system cannot find the file|[A-Za-z]:[\\/])')
 IMPORTANT = re.compile(r'\berror\b|undefined reference|No rule to make|ld returned|\bfailed\b', re.IGNORECASE)
-# What Makefile_GCN compiles: the GameCube side, and the port's sources in Moonlighter-Recomp.
+# What Makefile_GCN compiles: the GameCube side, and the port's sources in Moonlighter-Recomp
+# (but its scene facade, recomp/src/bind, which only a translated build compiles).
 SOURCE_DIRS = (Path('MLGC') / 'Source', Path('recomp') / 'src')
+# A translated build's own sources (Makefile_GCN: TRANSLATED=1), each with its object's prefix.
+TRANSLATED_DIRS = ((PROJECT / 'Intermediate' / 'gen', 'gen_'), (Path('recomp') / 'src' / 'bind', 'bind_'))
 
 
 def msys(path):
@@ -81,14 +86,19 @@ def console_python():
     return str(exe)
 
 
-def sources_to_compile(recomp):
+def sources_to_compile(recomp, translated=False):
     """(the sources make will compile, all of them): a source's object missing
     or older than it. A changed header makes more; the count grows then."""
     dirs = [HERE / SOURCE_DIRS[0], Path(recomp) / SOURCE_DIRS[1]]
-    sources = [f for d in dirs for pattern in ('*.cpp', '*.c') for f in d.rglob(pattern)]
+    bind = Path(recomp) / TRANSLATED_DIRS[1][0]
+    sources = [(f, '') for d in dirs for pattern in ('*.cpp', '*.c') for f in d.rglob(pattern) if bind not in f.parents]
+    if translated:
+        for folder, prefix in TRANSLATED_DIRS:
+            folder = folder if folder.is_absolute() else Path(recomp) / folder
+            sources += [(f, prefix) for f in folder.glob('*.cpp')]
     objects = PROJECT / 'Intermediate' / 'GCN'
-    stale = [f for f in sources if not (objects / (f.stem + '.o')).exists()
-             or (objects / (f.stem + '.o')).stat().st_mtime < f.stat().st_mtime]
+    stale = [f for f, prefix in sources if not (objects / (prefix + f.stem + '.o')).exists()
+             or (objects / (prefix + f.stem + '.o')).stat().st_mtime < f.stat().st_mtime]
     return len(stale), len(sources)
 
 
@@ -165,6 +175,7 @@ class Builder:
         self.game_folder = tk.StringVar(value=settings.get('game', ''))
         self.diag = tk.BooleanVar(value=False)
         self.sd_log = tk.BooleanVar(value=False)
+        self.translated = tk.BooleanVar(value=bool(settings.get('translated', False)))
         self.remake = tk.BooleanVar(value=False)
         self.verbose = tk.BooleanVar(value=False)
         self.entries = []  # every line of output: (text, shown without "Show every line")
@@ -199,6 +210,7 @@ class Builder:
         ttk.Checkbutton(options, text='Diagnostic build (memory census, flicker detector; slower)',
                         variable=self.diag).pack(side='left', padx=12)
         ttk.Checkbutton(options, text='SD card log (mlgc.log)', variable=self.sd_log).pack(side='left')
+        ttk.Checkbutton(options, text='Translated game code (needs .NET 9)', variable=self.translated).pack(side='left', padx=12)
 
         buttons = ttk.Frame(root)
         buttons.pack(fill='x', **pad)
@@ -338,8 +350,7 @@ class Builder:
         if folder:
             var.set(folder)
             try:
-                SETTINGS.write_text(json.dumps({'game': self.game_folder.get(), 'octave': self.octave.get(),
-                                                'recomp': self.recomp.get()}))
+                self.save_settings()
             except OSError:
                 pass
             self.check()
@@ -404,9 +415,21 @@ class Builder:
         with open(LOG_FILE, 'a', encoding='utf-8') as log:
             log.write(text + '\n')
 
+    def save_settings(self):
+        try:
+            SETTINGS.write_text(json.dumps({'game': self.game_folder.get(), 'octave': self.octave.get(),
+                                            'recomp': self.recomp.get(), 'translated': self.translated.get()}))
+        except OSError:
+            pass
+
     def build(self):
         if self.busy or not self.check():
             return
+        if self.translated.get() and not shutil.which('dotnet'):
+            self.status.configure(text='The translated build needs the .NET 9 SDK (dotnet): install it, or untick it.',
+                                  foreground='#c62828')
+            return
+        self.save_settings()
         self.busy = True
         self.build_button.configure(state='disabled')
         self.progress.pack(side='right')
@@ -456,7 +479,7 @@ class Builder:
     def watch_disc(self, recomp):
         """For Octave's output: the steps of the packaging, the compiling
         counted; shown, only errors."""
-        stale, everything = sources_to_compile(recomp)
+        stale, everything = sources_to_compile(recomp, self.translated.get())
         count = {'done': 0, 'total': stale or everything}
 
         # (from make's output, which comes as it happens: Octave's own comes
@@ -504,6 +527,9 @@ class Builder:
             env['ML_REPO'] = recomp.as_posix()
             env['DIAG'] = '1' if self.diag.get() else ''
             env['SDLOG'] = '1' if self.sd_log.get() else ''  # (a diagnostic build has it either way)
+            # The translated game code: Makefile_GCN runs the translator against your copy first.
+            env['TRANSLATED'] = '1' if self.translated.get() else ''
+            env['ML_GAME'] = str(self.game)
             # DIAG and SDLOG are compile flags: the program made again (make can't tell they changed).
             for stale in (PROJECT / 'Build' / 'GCN' / 'MLGC.dol', ISO):
                 try:
