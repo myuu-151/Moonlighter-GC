@@ -70,6 +70,30 @@ ifneq ($(GECKOLOG),)
 CFLAGS	+=	-DOCT_GECKO_LOG=1
 endif
 
+# TRANSLATED=1: the game's own code translated into C++ (Moonlighter-Recomp's tools/translate,
+# docs/translator_plan.md), compiled in with the scene facade (recomp/src/bind) it runs on. The
+# translator runs here first, as recomp/translated.cmake runs it: against your copy of the game
+# (ML_GAME, the folder with Moonlighter_Data; the builder sets it), into Intermediate/gen (never
+# committed). It runs again when units.txt, bindings.tsv or the tool's sources change. Needs the
+# .NET 9 SDK (dotnet). The game itself still runs the hand port (recomp/src/game): what isn't
+# called is left out by --gc-sections.
+# TTEST=1 (test builds, implies TRANSLATED=1): no game; the disc runs the BabySlime's oracle
+# replay (data/oracle/slime.jsonl) against the translated code and then against the hand port,
+# timed with the Gekko's timebase, its rows and numbers in Dolphin's log (Source/TranslatedTest.cpp;
+# tools/make_test_data.py puts the replay's data on the disc, tools/dolphin_test.ps1 runs it).
+# TTEST_PROFILE=1 (with TTEST): the translated replay alone, sampled (where its time goes:
+# tools/ttest_profile.py reads the samples with MLGC.elf's symbols).
+ifneq ($(TTEST),)
+export TRANSLATED := 1
+CFLAGS	+=	-DMLGC_TTEST=1
+endif
+ifneq ($(TTEST_PROFILE),)
+CFLAGS	+=	-DMLGC_TTEST_PROFILE=1
+endif
+ifneq ($(TRANSLATED),)
+CFLAGS	+=	-DMLGC_TRANSLATED=1
+endif
+
 # --gc-sections: what nothing uses stays out.
 LDFLAGS	=	-g $(MACHDEP) -Wl,-Map,$(notdir $@).map -Wl,--gc-sections -Wl,--no-eh-frame-hdr
 
@@ -108,9 +132,14 @@ CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 
 export LD	:=	$(CXX)
 export OFILES	:=	$(CPPFILES:.cpp=.o) $(CFILES:.c=.o)
+# TRANSLATED: where the translator writes (the project's Intermediate/, which git ignores).
+ifneq ($(TRANSLATED),)
+export ML_GEN	:=	$(CURDIR)/Intermediate/gen
+endif
 
 # The port's headers first: its game/ and render/ before Octave's own folders.
 export INCLUDE	:=	-I$(ML_SRC) \
+					$(if $(TRANSLATED),-I$(ML_GEN)) \
 					-I$(ML_BOX2D) \
 					-I$(ML_TESS2)/Include \
 					-I$(CURDIR)/Source \
@@ -126,9 +155,9 @@ export LIBPATHS	:=	-L$(ENGINE_LIB_DIR) -L$(BULLET_LIB_DIR) -L$(LIBOGC_LIB)
 export ENGINE_LIB := $(ENGINE_LIB_DIR)/libEngine.a
 export OUTPUT	:=	$(OUTPUT_DIR)/$(TARGET)
 
-.PHONY: $(BUILD) OutputDir EngineLib clean
+.PHONY: $(BUILD) OutputDir EngineLib Translate clean
 
-$(BUILD): OutputDir EngineLib
+$(BUILD): OutputDir EngineLib $(if $(TRANSLATED),Translate)
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile_GCN
 
@@ -139,6 +168,17 @@ OutputDir:
 EngineLib:
 	@$(MAKE) --no-print-directory -C $(OCTAVE)/Engine -f Makefile_GCN
 
+# TRANSLATED: the translator, when its inputs changed since it last ran (recomp/translated.cmake's
+# command; the decompiled game is cached in Moonlighter-Recomp's recomp/gen/decompiled).
+ML_TRANSLATE := $(ML_REPO)/tools/translate
+ML_TRANSLATE_INPUTS := $(ML_TRANSLATE)/units.txt $(ML_TRANSLATE)/bindings.tsv $(ML_TRANSLATE)/Translate.csproj \
+					$(wildcard $(ML_TRANSLATE)/*.cs)
+Translate: $(ML_GEN)/translated.stamp
+$(ML_GEN)/translated.stamp: $(ML_TRANSLATE_INPUTS)
+	@echo translating the game code with tools/translate ...
+	@dotnet run --project "$(ML_TRANSLATE)" -c Release -- translate --out "$(ML_GEN)" $(if $(ML_GAME),--managed "$(ML_GAME)/Moonlighter_Data/Managed")
+	@touch $@
+
 clean:
 	@echo clean ...
 	@rm -fr $(BUILD) $(OUTPUT).dol $(OUTPUT).elf
@@ -146,8 +186,48 @@ clean:
 #---------------------------------------------------------------------------------
 else
 
+# TRANSLATED: the translated sources (the list the translator wrote, sources.cmake) and the scene
+# facade, their objects named gen_<file>.o and bind_<file>.o: this folder holds every object by
+# its file's name, and the translation's names (Enemy, Constants, Chest...) are the hand port's too.
+ifneq ($(TRANSLATED),)
+GEN_SOURCES	:=	$(shell sed -n 's|.*/\([^/]*\.cpp\).*|\1|p' "$(ML_GEN)/sources.cmake")
+BIND_SOURCES	:=	$(notdir $(wildcard $(ML_SRC)/bind/*.cpp))
+OFILES	+=	$(addprefix gen_,$(GEN_SOURCES:.cpp=.o)) $(addprefix bind_,$(BIND_SOURCES:.cpp=.o))
+# Generated code: the untranslated methods' stubs leave parameters, locals and labels unused; C#'s
+# switches leave enum values out.
+GEN_CXXFLAGS	:=	-Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-label -Wno-switch
+
+gen_%.o: $(ML_GEN)/%.cpp
+	$(SILENTMSG) $(notdir $<)
+	$(SILENTCMD)$(CXX) -MMD -MP -MF $(DEPSDIR)/gen_$*.d $(CPPFLAGS) $(CXXFLAGS) $(GEN_CXXFLAGS) -c $< -o $@ $(ERROR_FILTER)
+
+bind_%.o: $(ML_SRC)/bind/%.cpp
+	$(SILENTMSG) $(notdir $<)
+	$(SILENTCMD)$(CXX) -MMD -MP -MF $(DEPSDIR)/bind_$*.d $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@ $(ERROR_FILTER)
+endif
+
+# TTEST: the replays themselves (Moonlighter-Recomp's tests), their main()s renamed for
+# Source/TranslatedTest.cpp to call. The translated one is built as its ctest is: tests/translated
+# first on the include path (its game/*.h name the translated classes).
+ifneq ($(TTEST),)
+VPATH	+=	$(ML_REPO)/recomp/tests $(ML_REPO)/recomp/tests/translated $(ML_REPO)/recomp/tests/translated/scene
+OFILES	+=	slime_test.o enemy_translated_test.o Standins.o
+slime_test.o: CXXFLAGS += -DML_TEST_MAIN=SlimeTestMain
+enemy_translated_test.o: CXXFLAGS += -DML_TEST_MAIN=EnemyTranslatedTestMain
+enemy_translated_test.o Standins.o: INCLUDE := -I$(ML_REPO)/recomp/tests/translated $(INCLUDE)
+TranslatedTest.o: INCLUDE := $(INCLUDE) -I$(ML_REPO)/recomp/tests
+endif
+
+# The build's variant: when TRANSLATED, TTEST or TTEST_PROFILE changes, what reads them is compiled
+# again, which links the program again. (With .SECONDARY, make skips a missing object whose source is
+# older than the program: a variant's own objects would be missed.)
+VARIANT_FILE	:=	$(DEPSDIR)/variant.txt
+VARIANT	:=	TRANSLATED=$(TRANSLATED) TTEST=$(TTEST) TTEST_PROFILE=$(TTEST_PROFILE)
+$(shell [ "$$(cat $(VARIANT_FILE) 2>/dev/null)" = "$(VARIANT)" ] || echo "$(VARIANT)" > $(VARIANT_FILE))
+
 $(OUTPUT).dol: $(OUTPUT).elf
 $(OUTPUT).elf: $(OFILES) $(ENGINE_LIB)
+Main.o TranslatedTest.o TranslatedLoad.o: $(VARIANT_FILE)
 
 -include $(DEPSDIR)/*.d
 

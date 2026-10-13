@@ -11,6 +11,7 @@
 
 #include "DungeonView.h"
 #include "MoonGame.h"
+#include "TranslatedTest.h"
 
 // Octave's packager generates these; embedded builds ("GameCube Embedded") fill them.
 #if __has_include("../Generated/EmbeddedAssets.h")
@@ -70,6 +71,12 @@ void OctPostInitialize()
     VIDEO_Configure(rmode);
     VIDEO_Flush();
     VIDEO_WaitVSync();
+
+#if MLGC_TTEST
+    // A test build: the replays, no game (Source/TranslatedTest.cpp).
+    RunTranslatedTest();
+    return;
+#endif
 
     sGame = new MoonGame();
     if (!sGame->Initialize())

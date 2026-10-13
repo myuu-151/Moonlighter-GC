@@ -64,6 +64,31 @@ This compiles `MLGC/Source/` and Moonlighter-Recomp's `recomp/src/` with `MLGC/M
 and packs it with the data: `MLGC/Packaged/GameCube/MLGC.iso`. `make -f Makefile_GCN` in
 `MLGC/` compiles just the DOL.
 
+### The translated game code
+
+With `TRANSLATED=1` in the environment (the builder: "Translated game code"), the build first
+runs Moonlighter-Recomp's translator against your copy of the game (`ML_GAME`: its folder; needs
+the [.NET 9 SDK](https://dotnet.microsoft.com/download)) into `MLGC/Intermediate/gen/`, and
+compiles the game's own code, translated, with the scene facade it runs on (`recomp/src/bind`).
+The game itself still runs the hand port; the translated code is what's coming
+(Moonlighter-Recomp's `docs/translation_strategy.md`).
+
+### The GameCube test of the translated code
+
+A test disc runs the BabySlime's oracle recording against the translated code and then the hand
+port, compares every row with the game's, and times both on the Gekko's timebase (Moonlighter-Recomp's
+`docs/gamecube_translated.md` has the results):
+
+```
+py tools/make_test_data.py --recomp <Moonlighter-Recomp>      (the recording and its data, on the disc)
+TTEST=1 in the environment, then Octave.exe -headless ... -build GameCube   (as above)
+powershell -File tools\dolphin_test.ps1 -Out build\ttest.log    (Dolphin, on a hidden desktop)
+```
+
+`TTEST_PROFILE=1` as well samples where the translated replay's time goes;
+`py tools/ttest_profile.py build\ttest.log` reads the samples. Test builds run in Dolphin only:
+they print through OSReport, which overwrites a console's clock.
+
 ## What it does so far
 
 Dungeon floors, generated on the console by Moonlighter-Recomp's generator (the code its
@@ -109,6 +134,7 @@ Debug, holding START:
 | `tools/builder.py` | The builder window |
 | `tools/make_data.py` | Makes the data from your Steam copy, with Moonlighter-Recomp's extractors |
 | `tools/make_art.py` | The disc banner (`MLGC/opening.bnr`) and the memory card save's icon and banner, from `art/` |
+| `tools/make_test_data.py`, `tools/dolphin_test.ps1`, `tools/ttest_profile.py` | The GameCube test of the translated code: its data, Dolphin on a hidden desktop, the profile |
 | `art/` | The disc banner and the memory card banner (96 x 32), the memory card icon (32 x 32), and this page's banner |
-| `MLGC/Source/` | The GameCube side: `MoonGame` (floors, rooms, the pad, Will, the HUD), `RoomEnemies` (the room's live enemies), `DungeonView` (draws a room with GX), `DiscData` (the data on the disc), `Main.cpp` |
-| `MLGC/Makefile_GCN` | Compiles these and Moonlighter-Recomp's `recomp/src` (`cs`, `unity`, `util`, `game`, `render`) |
+| `MLGC/Source/` | The GameCube side: `MoonGame` (floors, rooms, the pad, Will, the HUD), `RoomEnemies` (the room's live enemies), `DungeonView` (draws a room with GX), `DiscData` (the data on the disc), `Main.cpp`; `TranslatedTest` (the test builds' replays) |
+| `MLGC/Makefile_GCN` | Compiles these and Moonlighter-Recomp's `recomp/src` (`cs`, `unity`, `util`, `game`, `render`; with `TRANSLATED=1`, the translated code and `bind`) |
