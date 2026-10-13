@@ -108,6 +108,22 @@ private:
     int endDoorSide_ = -1; // (ENDROOM test builds)
     // The floor's killed enemies, by cell: their spawn tiles.
     std::map<int, std::vector<int>> deadEnemies_;
+    // The room's breakables (BreakableObject: pots and the like, HardEnemy, 1 health): where,
+    // their art's quad, their broken sprite; the floor's broken ones by cell (they stay broken).
+    struct Breakable {
+        std::string path; // the instance's row ("..._Breakable(Clone)")
+        std::string key;  // path@n: the n-th instance with that path
+        unity::Vector2 position;
+        int quad = -1;
+        std::string brokenSprite;
+        bool broken = false;
+    };
+    std::vector<Breakable> breakables_;
+    std::map<int, std::vector<std::string>> brokenBreakables_;
+    void FindBreakables(const game::RoomFill& room, unity::Vector2 roomPos);
+    void Break(Breakable& b);
+    int HitBreakables();
+    std::vector<const Breakable*> hitThisSwing_;
     int defaultLayer_ = 0;
 
     // This frame's pad, as the game's actions (ReadPad).

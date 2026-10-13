@@ -54,6 +54,10 @@ endif
 ifneq ($(ENEMYROOM),)
 CFLAGS	+=	-DMLGC_ENEMYROOM
 endif
+# BREAKTEST=1 (test builds): Will beside a room's first breakable, swinging.
+ifneq ($(BREAKTEST),)
+CFLAGS	+=	-DMLGC_BREAKTEST
+endif
 # ENDROOM=1 (test builds): the floor starts in its room with the next-level door, Will walking at it.
 ifneq ($(ENDROOM),)
 CFLAGS	+=	-DMLGC_ENDROOM

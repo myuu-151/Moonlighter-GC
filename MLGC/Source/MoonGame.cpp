@@ -20,13 +20,14 @@
 #include "game/RoomDoors.h"
 #include "game/RoomPhysics.h"
 #include "game/RoomScene.h"
+#include "game/SceneTransform.h"
 #include "util/Json.h"
 
 using namespace game;
 
 // A test build's line in Dolphin's log (OSReport). Only in AUTOTOUR builds, which run in
 // Dolphin: on a console SYS_Report overwrites the RTC counter (Octave's System_Dolphin.cpp).
-#if defined(MLGC_AUTOTOUR) || defined(MLGC_AUTOWALK) || defined(MLGC_PADLOG) || defined(MLGC_ENDROOM)
+#if defined(MLGC_AUTOTOUR) || defined(MLGC_AUTOWALK) || defined(MLGC_PADLOG) || defined(MLGC_ENDROOM) || defined(MLGC_BREAKTEST)
 #define TOUR_REPORT(...) SYS_Report(__VA_ARGS__)
 #else
 #define TOUR_REPORT(...) ((void)0)
@@ -147,6 +148,8 @@ void MoonGame::NewFloor()
     FreeSpriteTextures();
     tiles_.clear();
     enemies_.reset(); // (the last floor's: before its kills are forgotten)
+    breakables_.clear();
+    brokenBreakables_.clear();
     floor_ = session_.Generate(culture, level_);
     deadEnemies_.clear();
     if (bank_.Folder() != std::string("sprites/") + Session::PackName(culture) + "/") {
@@ -238,6 +241,11 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
     const PlacedCell& c = floor_->dungeon->cells[static_cast<size_t>(cell)];
     const unity::Vector2 roomPos = RoomPosition(c.x, c.y);
     // The room's colliders, and Will inside the door he came through (or in the middle).
+    {
+        std::vector<std::string>& broken = brokenBreakables_[cell_];
+        for (const Breakable& b : breakables_)
+            if (b.broken && std::find(broken.begin(), broken.end(), b.key) == broken.end()) broken.push_back(b.key);
+    }
     if (enemies_) {
         std::vector<int>& dead = deadEnemies_[cell_];
         for (int t : enemies_->DeadTiles())
@@ -298,6 +306,17 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
                                              return false;
                                          }),
                           room_.quads.end());
+    FindBreakables(*c.room, roomPos);
+#ifdef MLGC_BREAKTEST
+    // Test builds (BREAKTEST=1): Will beside the room's first breakable, facing it.
+    if (hero_ && !breakables_.empty()) {
+        hero_->TeleportTo({breakables_[0].position.x - 28.0f, breakables_[0].position.y});
+        hero_->SetDirection(HeroMerchantController::Right);
+    }
+#endif
+    for (const Breakable& b : breakables_)
+        TOUR_REPORT("mlgc: breakable %s at %.1f %.1f quad %d broken sprite %s\n", b.path.c_str(), b.position.x, b.position.y, b.quad,
+                    b.brokenSprite.c_str());
     char line[256];
     std::snprintf(line, sizeof line, "%s floor %d (seed %d)  room %d/%zu: %s  %zu objects%s", kCultureNames[culture_], level_ + 1, seed_, cell + 1,
                   floor_->dungeon->cells.size(), c.info->name.c_str(), room_.quads.size(), missing.empty() ? "" : "  (sprites missing)");
@@ -406,7 +425,9 @@ void MoonGame::Update(float deltaTime)
             }
             return;
         }
-        if (enemies_ && enemies_->Update(deltaTime) > 0) hitStop_ = Constants::GetFloat("hitToEnemyEffectDuration");
+        int hits = enemies_ ? enemies_->Update(deltaTime) : 0;
+        hits += HitBreakables();
+        if (hits > 0) hitStop_ = Constants::GetFloat("hitToEnemyEffectDuration");
 #ifdef MLGC_AUTOWALK
         static int enemyFrame = 0;
         if (enemies_ && hero_ && ++enemyFrame % 30 == 0) {
@@ -505,6 +526,10 @@ void MoonGame::UpdateHero(float deltaTime)
 {
     if (!hero_) return;
     float x = pad_.stick.x, y = pad_.stick.y;
+#ifdef MLGC_BREAKTEST
+    static int breakFrame = 0;
+    pad_.action1 = ++breakFrame % 41 == 0; // swing now and then, standing still
+#endif
 #ifdef MLGC_ENDROOM
     // Straight at the next-level door (north, south, west, east).
     static const float kToward[4][2] = {{0, 1}, {0, -1}, {-1, 0}, {1, 0}};
@@ -653,6 +678,89 @@ void MoonGame::DrawQuad(const render::DrawQuad& q, const GxTexture& tex, float f
     }
     GX_End();
     if (flash > 0.0f) GX_SetNumTevStages(1);
+}
+
+// The room's breakables: the instances of prefabs with a BreakableObject, their place, the
+// quad of their art (the SpriteRenderer below them) and the broken sprite of their skin.
+void MoonGame::FindBreakables(const RoomFill& room, unity::Vector2 roomPos)
+{
+    breakables_.clear();
+    hitThisSwing_.clear();
+    const std::vector<SceneRow> rows = RoomSceneTree(room, roomPos);
+    const SceneWorld world = ResolveScene(rows, roomPos);
+    const std::vector<std::string>& broken = brokenBreakables_[cell_];
+    std::map<std::string, int> seen; // instances of one prefab share a path: the n-th row, the n-th quad
+    for (size_t i = 0; i < rows.size(); i++) {
+        const std::string& p = rows[i].path;
+        const size_t at = p.rfind("_Breakable(Clone)");
+        if (at == std::string::npos || at + 17 != p.size() || !world.active[i]) continue;
+        // The prefab: the instance's name without "(Clone)" (its bundle's, any).
+        const size_t slash = p.rfind('/');
+        const std::string prefabName = p.substr(slash == std::string::npos ? 0 : slash + 1, p.size() - 7 - (slash == std::string::npos ? 0 : slash + 1));
+        const Prefab* prefab = PrefabLibrary::Find(prefabName);
+        Breakable b;
+        const int nth = seen[p]++;
+        b.path = p;
+        b.key = p + "@" + std::to_string(nth);
+        b.position = {world.world[i].tx, world.world[i].ty};
+        if (prefab)
+            for (const Behaviour& beh : prefab->nodes[0].behaviours) {
+                auto skins = beh.raw.find("skins");
+                if (skins != beh.raw.end() && skins->second.size() > 0 && skins->second[0].Find("broken"))
+                    b.brokenSprite = skins->second[0]["broken"].s;
+            }
+        int k = 0;
+        for (size_t q = 0; q < room_.quads.size() && b.quad < 0; q++)
+            if (room_.quads[q].path.rfind(p + "/", 0) == 0 && room_.quads[q].sprite && k++ == nth) b.quad = static_cast<int>(q);
+        breakables_.push_back(b);
+        if (std::find(broken.begin(), broken.end(), b.key) != broken.end()) Break(breakables_.back());
+    }
+}
+
+// BreakableObjectBehaviour.BreakableDeath: the broken sprite, every collider off. Not yet: the
+// drops (DropObjects), the particles, the PolyNav obstacle.
+void MoonGame::Break(Breakable& b)
+{
+    b.broken = true;
+    TOUR_REPORT("mlgc: broke %s\n", b.path.c_str());
+    if (b.quad >= 0 && !b.brokenSprite.empty())
+        if (const render::Sprite* s = bank_.Find(b.brokenSprite)) {
+            render::DrawQuad& q = room_.quads[static_cast<size_t>(b.quad)];
+            // Same pivot: the new sprite's rectangle around the object's place.
+            const float cx = b.position.x, cy = b.position.y;
+            const float x0 = cx + s->left, y0 = cy + s->bottom;
+            const float x1 = x0 + static_cast<float>(s->width) * s->unitsPerPixel, y1 = y0 + static_cast<float>(s->height) * s->unitsPerPixel;
+            q.sprite = s;
+            q.x[0] = x0, q.y[0] = y0;
+            q.x[1] = x1, q.y[1] = y0;
+            q.x[2] = x1, q.y[2] = y1;
+            q.x[3] = x0, q.y[3] = y1;
+        }
+    for (unity::Collider2D& c : physics_.Colliders())
+        if (c.path.rfind(b.path, 0) == 0 && (c.path.size() == b.path.size() || c.path[b.path.size()] == '/') &&
+            std::abs(c.position.x - b.position.x) < 1.0f && std::abs(c.position.y - b.position.y) < 1.0f)
+            c.enabled = false; // (its own: instances share a path, not a place)
+}
+
+// Will's swing against the breakables (the same as the enemies': each once a swing, its 24 x 24
+// box; 1 health, so a hit breaks it).
+int MoonGame::HitBreakables()
+{
+    const Weapon* w = hero_ ? hero_->weapon : nullptr;
+    if (!w || !w->hitboxActive) {
+        hitThisSwing_.clear();
+        return 0;
+    }
+    int hits = 0;
+    const unity::Vector2 c = hero_->position + w->hitboxPosition + w->hitboxOffset;
+    for (Breakable& b : breakables_) {
+        if (b.broken || std::find(hitThisSwing_.begin(), hitThisSwing_.end(), &b) != hitThisSwing_.end()) continue;
+        if (std::abs(b.position.x - c.x) > w->hitboxSize.x * 0.5f + 12.0f || std::abs(b.position.y - c.y) > w->hitboxSize.y * 0.5f + 12.0f) continue;
+        hitThisSwing_.push_back(&b);
+        Break(b);
+        hits++;
+    }
+    return hits;
 }
 
 void MoonGame::DrawRect(float x0, float y0, float x1, float y1, GXColor color)
