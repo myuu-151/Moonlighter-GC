@@ -13,7 +13,7 @@ using unity::Vector2;
 
 RoomEnemies::RoomEnemies(const Data& data, const RoomFill& room, Vector2 roomPosition, const unity::Physics2D& roomColliders,
                          HeroMerchantController& hero, const Attack& attack, int level, int dungeonCulture, const std::vector<int>& dead)
-    : hero_(hero), attack_(attack), world_(*data.physics)
+    : hero_(hero), attack_(attack), world_(*data.physics), playSound_(data.playSound)
 {
     std::vector<std::pair<int, std::string>> spawns;
     for (const auto& s : room.enemies)
@@ -37,6 +37,16 @@ RoomEnemies::RoomEnemies(const Data& data, const RoomFill& room, Vector2 roomPos
     scene_.tweens = &tweens_;
     scene_.hero = &heroView_;
     scene_.spawnEnemyDeadSprite = [this](const std::string& sprite, Vector2 at) { deadSprites_.emplace_back(sprite, at); };
+    scene_.audio = data.audio;
+    // Enemy.DealDamage's hit sound (not for an effect's damage), Enemy.PlayDeathSound.
+    scene_.onEnemyReceivesDamage = [this](Enemy& e, float, EnemyDamageReceivedType type) {
+        const std::string& sound = SoundOf(e, hitSound_);
+        if (type != EnemyDamageReceivedType::Effect && !sound.empty() && playSound_) playSound_(sound);
+    };
+    scene_.spawnDeathParticles = [this](Enemy& e) {
+        const std::string& sound = SoundOf(e, deathSound_);
+        if (playSound_) playSound_(sound.empty() ? std::string("enemy_death") : sound);
+    };
 
     EnemyStatsContext context;
     context.level = level;
@@ -60,6 +70,17 @@ RoomEnemies::RoomEnemies(const Data& data, const RoomFill& room, Vector2 roomPos
                 for (const Behaviour& b : n.behaviours)
                     if (b.cls == "SpriteDepthOrderRender") depth = static_cast<int>(b.Field("offset"));
         }
+        // Its sounds: the behaviour's soundWhenHit, the Enemy's enemyDeathSound.
+        std::string hit, death;
+        for (const PrefabNode& n : prefab->nodes)
+            for (const Behaviour& b : n.behaviours) {
+                auto h = b.raw.find("soundWhenHit");
+                if (h != b.raw.end() && h->second.IsString() && hit.empty()) hit = h->second.s;
+                auto d = b.raw.find("enemyDeathSound");
+                if (d != b.raw.end() && d->second.IsString() && death.empty()) death = d->second.s;
+            }
+        hitSound_.push_back(hit);
+        deathSound_.push_back(death);
         EnemyStatModificator m;
         EnemyStatModificator::FromJson(*data.enemyStats, name, m);
         // Under its EnemySpawn (at the tile), the room's enemy container, the room.
@@ -83,6 +104,14 @@ RoomEnemies::RoomEnemies(const Data& data, const RoomFill& room, Vector2 roomPos
             e->enemyBehaviour->StartTargetingPlayerAfterTime(1.0f);
         }
     });
+}
+
+const std::string& RoomEnemies::SoundOf(const Enemy& e, const std::vector<std::string>& sounds) const
+{
+    static const std::string none;
+    for (size_t i = 0; i < enemies_.size() && i < sounds.size(); i++)
+        if (enemies_[i].get() == &e) return sounds[i];
+    return none;
 }
 
 std::vector<int> RoomEnemies::DeadTiles() const

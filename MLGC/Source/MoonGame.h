@@ -19,6 +19,7 @@
 #include <gccore.h>
 
 #include "DiscData.h"
+#include "GameSound.h"
 #include "RoomEnemies.h"
 #include "game/Composite.h"
 #include "game/HeroMerchantController.h"
@@ -35,6 +36,7 @@ public:
     ~MoonGame();
 
     bool Initialize();
+    // A frame: MasterAudio's clocks, the game, then MasterAudio's LateUpdate (the sounds start).
     void Update(float deltaTime);
     // Draws the current room into the framebuffer, letterboxed or anamorphic (GX state is the
     // caller's to restore).
@@ -49,6 +51,7 @@ private:
         void* texels = nullptr;
     };
 
+    void UpdateGame(float deltaTime);
     void NewFloor();
     // `from`: the side Will comes in by (0 north, 1 south, 2 west, 3 east), -1 the middle;
     // `arrival`: where (the door he left by: its arrival point, in front of this room's door).
@@ -70,6 +73,15 @@ private:
     void DrawHud(unity::Vector2 viewCenter);
 
     DiscData data_;
+    GameSound sound_;
+    // The hero's sounds the game plays from his scripts (HeroMerchant.DealDamageToPlayer's
+    // will_damaged, Dash.UseAbility's will_roll, the potion's), told by what changed.
+    float lastHealth_ = 0.0f;
+    int lastPotions_ = 0;
+    bool lastAbility_ = true, lastDead_ = false;
+    void HeroSounds();
+    void HeroEventSound(const std::string& function);
+    void WeaponEventSound(const std::string& function);
     game::Session session_{data_};
     std::unique_ptr<game::Floor> floor_;
     render::SpriteBank bank_;
@@ -116,12 +128,14 @@ private:
         unity::Vector2 position;
         int quad = -1;
         std::string brokenSprite;
+        std::string breakSound; // its BreakableObject's enemyDeathSound
         bool broken = false;
     };
     std::vector<Breakable> breakables_;
     std::map<int, std::vector<std::string>> brokenBreakables_;
     void FindBreakables(const game::RoomFill& room, unity::Vector2 roomPos);
-    void Break(Breakable& b);
+    // `sound`: as it breaks (not a room's already broken ones, broken again on the way in).
+    void Break(Breakable& b, bool sound = true);
     int HitBreakables();
     std::vector<const Breakable*> hitThisSwing_;
     int defaultLayer_ = 0;

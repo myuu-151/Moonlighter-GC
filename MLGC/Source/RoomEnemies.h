@@ -7,8 +7,15 @@
 // swing is WeaponCollisionDetection's new contact), with the weapon's strength plus his, doubled
 // on the third of a combo, and knocks it back; Update returns how many it hit (the caller's
 // hit-stop). Not yet: the damage numbers, drops.
+//
+// Their sounds: what the port plays itself (MasterAudio.PlaySound in their behaviours, their
+// EventSounds) through `audio`, the port's MasterAudio; the hit sound (Enemy.DealDamage: the
+// behaviour's soundWhenHit) and the death sound (EnemyBehaviour.SpawnDeathParticles:
+// Enemy.PlayDeathSound, its enemyDeathSound or "enemy_death"), which the port doesn't play,
+// through `playSound` (GameSound::Play).
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,6 +38,8 @@ public:
         const unity::AnimatorController* controllers[3] = {}; // animators/<name>.json, by kPorted
         const json::Value* enemyStats = nullptr;               // enemy_stats.json
         const unity::Physics2DSettings* physics = nullptr;      // physics2d.json
+        game::MasterAudio* audio = nullptr;                     // the port's MasterAudio
+        std::function<void(const std::string& group)> playSound;
     };
     // Will's weapon hits: its strength (5 + his items') and the weapon's knockback.
     struct Attack {
@@ -87,6 +96,9 @@ private:
     std::vector<std::unique_ptr<game::Enemy>> enemies_;
     std::vector<int> tiles_;       // per enemy: its spawn tile
     std::vector<int> depthOffset_; // per enemy: its art's SpriteDepthOrderRender.offset
+    std::vector<std::string> hitSound_, deathSound_; // per enemy: its prefab's
+    std::function<void(const std::string&)> playSound_;
+    const std::string& SoundOf(const game::Enemy& e, const std::vector<std::string>& sounds) const;
     std::vector<unity::Vector2> artOffset_;
     std::vector<std::pair<std::string, unity::Vector2>> deadSprites_;
     std::vector<const game::Enemy*> hitThisSwing_;

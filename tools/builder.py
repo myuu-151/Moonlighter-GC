@@ -188,7 +188,7 @@ class Builder:
         checks = ttk.LabelFrame(root, text='What the build needs')
         checks.pack(fill='x', **pad)
         self.rows = {}
-        for key, title in (('game', 'Moonlighter (Steam)'), ('pillow', 'Python: Pillow, UnityPy'),
+        for key, title in (('game', 'Moonlighter (Steam)'), ('pillow', 'Python: Pillow, UnityPy, numpy'),
                            ('devkitpro', 'GameCube toolchain'), ('octave', 'Octave-libogc'),
                            ('recomp', 'Moonlighter-Recomp')):
             row = ttk.Frame(checks)
@@ -296,7 +296,8 @@ class Builder:
         ok = True
         sys.path.insert(0, str(HERE / 'tools'))
         missing = []
-        for module, package in (('PIL', 'pillow'), ('UnityPy', 'UnityPy')):
+        for module, package in (('PIL', 'pillow'), ('UnityPy', 'UnityPy'), ('numpy', 'numpy'),
+                                ('TypeTreeGeneratorAPI', 'TypeTreeGeneratorAPI')):  # (the last two: the sound)
             try:
                 __import__(module)
             except ImportError:

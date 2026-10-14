@@ -10,9 +10,12 @@ ignores), for the disc.
 2. Extracts from it with Moonlighter-Recomp's tools/extract/, into build/game/: the
    Constants table, the room database, each dungeon's generation data and details
    registers, the asset bundles' index, the Wanderer DLC's rooms (if the DLC is installed),
-   the prefabs, the per-dungeon packs, the painted textures' tiles, the sprites and the hero's animator.
+   the prefabs, the per-dungeon packs, the painted textures' tiles, the sprites and the hero's animator,
+   MasterAudio's sound groups, and the sound (every clip decoded to PCM, with who plays it).
 3. Copies what the disc needs into MLGC/Scripts/Data (which git ignores), and makes the disc
    banner and the memory card art (tools/make_art.py).
+4. Converts the sound for the GameCube (tools/make_audio.py: DSP-ADPCM banks and streams, into
+   MLGC/Scripts/Data/audio). Without numpy and TypeTreeGeneratorAPI the disc is silent.
 
 Nothing from the game is stored in this repository.
 """
@@ -105,7 +108,21 @@ def main():
     step("the hero's animator and sprites", [extract / 'animators.py', '--game', game, '--out', WORK])
     step('the items', [extract / 'items.py', '--game', game, '--out', WORK])
     step('the 2D physics settings', [extract / 'physics2d.py', '--game', game, '--out', WORK])
+    try:
+        import numpy  # noqa: F401
+        import TypeTreeGeneratorAPI  # noqa: F401
+        sound = True
+    except ImportError:
+        sound = False
+    if sound:
+        step("MasterAudio's sound groups", [extract / 'sound_groups.py', '--game', game, '--out', WORK])
+        step('the sound (decoding the clips)', [extract / 'audio.py', '--game', game, '--out', WORK])
     copy_into_project()
+    if sound:
+        step('the sound for the GameCube (DSP-ADPCM)', [HERE / 'tools' / 'make_audio.py', '--work', WORK, '--out', DATA])
+    else:
+        print('-- the sound: skipped (it needs numpy and TypeTreeGeneratorAPI: py -m pip install numpy TypeTreeGeneratorAPI)',
+              flush=True)
     print(f'-- done: {DATA}', flush=True)
 
 
