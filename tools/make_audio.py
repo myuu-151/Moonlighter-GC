@@ -24,7 +24,8 @@ project's Scripts/Data/audio (which git ignores), as Source/AudioGc.cpp plays th
 - audio/index.json: {"rate": 32000, "blockFrames": 512,
     "banks": {bank: {"file", "bytes", "creators"}},
     "creators": {creator: {"bank", "groups"}},
-    "clips": {key: {"bank", "offset", "bytes", "rate", "channels", "samples"} or
+    "clips": {key: {"banks": [[bank, offset], ...] (each bank it's in), "bytes", "rate", "channels",
+                     "samples"} or
                    {"stream", "bytes", "rate", "channels", "samples"}},
     "playlists": {name: {"crossFadeTime", "songs": [{"clip", "volume", "pitch", "loop"}]}},
     "controllers": {name: {"startPlaylistName", "playlistVolume", "loopPlaylist", "mixerGain"}},
@@ -196,7 +197,7 @@ def plan(audio, groups_json):
             elif DUNGEON_COMMON in who and who <= set(DUNGEONS) | {DUNGEON_COMMON}:
                 banks = [DUNGEON_COMMON]
             else:
-                banks = sorted(who)
+                banks = sorted(c for c in who if ':' not in c)  # (not the tutorial's copy of the town's)
         out[key] = {'stream': stream, 'channels': c['channels'] if stream else 1, 'banks': banks,
                     'loop': key in looped}
     return out
@@ -309,9 +310,9 @@ def pack(audio, groups_json, wanted, manifest, cache, out_root):
                 continue
             m = manifest[key]
             blob = (cache / (safe(key) + '.dsp')).read_bytes()
-            entry = {'bank': bank, 'offset': len(data), 'bytes': len(blob), 'rate': m['rate'], 'channels': 1,
-                     'samples': m['samples']}
-            index['clips'].setdefault(key, entry)
+            entry = index['clips'].setdefault(key, {'banks': [], 'bytes': len(blob), 'rate': m['rate'], 'channels': 1,
+                                                    'samples': m['samples']})
+            entry['banks'].append([bank, len(data)])
             data += blob
         (out / 'banks' / f'{bank}.bin').write_bytes(bytes(data))
         index['banks'][bank] = {'file': f'audio/banks/{bank}.bin', 'bytes': len(data), 'creators': [creator]}

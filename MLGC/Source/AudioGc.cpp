@@ -54,9 +54,9 @@ constexpr uint32_t kHandleShift = 6;
 
 struct Clip {
     std::string name;
-    int bank = -1;           // -1: streamed
-    std::string stream;      // its file (streams)
-    uint32_t offset = 0, bytes = 0, rate = kOutputRate, samples = 0;
+    std::vector<std::pair<int, uint32_t>> banks; // (bank, offset) for each bank it's in; none: streamed
+    std::string stream;                          // its file (streams)
+    uint32_t bytes = 0, rate = kOutputRate, samples = 0;
     uint8_t channels = 1;
 };
 
@@ -491,11 +491,12 @@ bool Init(const json::Value& index)
     for (const auto& [key, c] : index["clips"].obj) {
         Clip clip;
         clip.name = key;
-        if (const json::Value* bank = c.Find("bank")) {
-            auto it = bankIndex.find(bank->s);
-            if (it == bankIndex.end()) continue;
-            clip.bank = it->second;
-            clip.offset = static_cast<uint32_t>(c["offset"].AsInt());
+        if (const json::Value* banks = c.Find("banks")) {
+            for (const json::Value& b : banks->arr) {
+                auto it = bankIndex.find(b[0].s);
+                if (it != bankIndex.end()) clip.banks.emplace_back(it->second, static_cast<uint32_t>(b[1].AsInt()));
+            }
+            if (clip.banks.empty()) continue;
         } else {
             clip.stream = c["stream"].s;
         }
@@ -616,12 +617,23 @@ uint32_t Play(int clipIndex, const PlayParams& p)
     uint32_t handle = 0;
     {
         Lock lock;
-        const Bank* bank = clip.bank >= 0 ? &g_banks[static_cast<size_t>(clip.bank)] : nullptr;
-        if (bank && (!bank->aram || clip.offset + clip.bytes > bank->loaded)) {
+        // A bank it's in, read into ARAM that far.
+        const Bank* bank = nullptr;
+        uint32_t offset = 0;
+        for (const auto& [b, at] : clip.banks) {
+            const Bank& candidate = g_banks[static_cast<size_t>(b)];
+            if (candidate.aram && at + clip.bytes <= candidate.loaded) {
+                bank = &candidate;
+                offset = at;
+                break;
+            }
+        }
+        if (!clip.banks.empty() && !bank) {
             g_stats.unplayed++;
             if (!g_loggedEarly) {
                 g_loggedEarly = true;
-                AUDIO_LOG("audio: mismatch: %s played before its bank (%s) was in ARAM (silent)\n", clip.name.c_str(), bank->name.c_str());
+                AUDIO_LOG("audio: mismatch: %s played before its bank (%s) was in ARAM (silent)\n", clip.name.c_str(),
+                          g_banks[static_cast<size_t>(clip.banks[0].first)].name.c_str());
             }
             return 0;
         }
@@ -663,7 +675,7 @@ uint32_t Play(int clipIndex, const PlayParams& p)
         v->clip = &clip;
         v->bank = bank;
         v->blocks = (clip.samples + dsp::kBlockSamples - 1) / dsp::kBlockSamples;
-        v->base = bank ? bank->aram + clip.offset : 0;
+        v->base = bank ? bank->aram + offset : 0;
         const uint32_t startSample = std::min(static_cast<uint32_t>(std::clamp(p.start, 0.0f, 1.0f) * static_cast<float>(clip.samples)),
                                               clip.samples > 0 ? clip.samples - 1 : 0);
         v->nextBlock = startSample / dsp::kBlockSamples;
@@ -700,7 +712,7 @@ uint32_t Play(int clipIndex, const PlayParams& p)
         v->active = true;
         handle = v->handle;
     }
-    if (clip.bank < 0) LWP_SemPost(g_readerSem);
+    if (clip.banks.empty()) LWP_SemPost(g_readerSem);
     return handle;
 }
 
