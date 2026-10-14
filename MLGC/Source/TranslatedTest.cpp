@@ -25,6 +25,16 @@
 #ifndef MLGC_TTEST_PROFILE
 #define MLGC_TTEST_PROFILE 0
 #endif
+// TTEST_GC_AUTO=1: the translated replay collects as the game does, when enough was made
+// (ML_GC_AUTO: cs::Heap::CollectDue), not at every frame end (the ctest's _gc check).
+#ifndef MLGC_TTEST_GC_AUTO
+#define MLGC_TTEST_GC_AUTO 0
+#endif
+// TTEST_SQRT=1: Moonlighter-Recomp's util/GekkoSqrt (sqrt and sqrtf from frsqrte and fmadd) against
+// newlib's bit-by-bit __ieee754_sqrt(f) on the Gekko itself: every float in [1, 4), and the time.
+#ifndef MLGC_TTEST_SQRT
+#define MLGC_TTEST_SQRT 0
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -32,6 +42,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #include <sys/iosupport.h>
 #include <sys/stat.h>
@@ -542,6 +553,58 @@ void StopSampler()
 }
 #endif
 
+#if MLGC_TTEST_SQRT
+extern "C" double __ieee754_sqrt(double);
+extern "C" float __ieee754_sqrtf(float);
+
+// Every float in [1, 4) (both exponent parities, every mantissa: every path frsqrte's table has;
+// the rest of the floats scale these exactly), through sqrtf and through sqrt of its double.
+void CheckSqrt()
+{
+    printf("\nSQRT util/GekkoSqrt against newlib's __ieee754_sqrt(f), every float in [1, 4)\n");
+    uint32_t bad = 0, n = 0;
+    for (uint32_t bits = 0x3F800000u; bits < 0x40800000u; bits++) {
+        float x;
+        memcpy(&x, &bits, 4);
+        volatile float xf = x;
+        const float a = sqrtf(xf), b = __ieee754_sqrtf(xf);
+        const double c = sqrt(static_cast<double>(xf)), d = __ieee754_sqrt(static_cast<double>(xf));
+        if (memcmp(&a, &b, 4) != 0 || memcmp(&c, &d, 8) != 0) {
+            if (bad < 10) printf("SQRT mismatch at %08x\n", static_cast<unsigned>(bits));
+            bad++;
+        }
+        n++;
+    }
+    const double specials[] = {0.0, -0.0, 1e-310, 4.9e-324, 2.2250738585072014e-308, 1e308, 1.7976931348623157e308, 0.5, 2.0, 1e-30, 3.0e30};
+    for (double s : specials) {
+        volatile double v = s;
+        const double c = sqrt(v), d = __ieee754_sqrt(v);
+        if (memcmp(&c, &d, 8) != 0) {
+            printf("SQRT mismatch at %.17g\n", s);
+            bad++;
+        }
+        n++;
+    }
+    printf("SQRT %u inputs, %u mismatches%s\n", static_cast<unsigned>(n), static_cast<unsigned>(bad), bad ? "" : ": ALL MATCH");
+    // the time of 100,000 calls each (the Gekko's timebase in Dolphin)
+    volatile double sink = 0;
+    double v = 1.0;
+    const uint64_t t0 = gettime();
+    for (int i = 0; i < 100000; i++) {
+        sink = sink + sqrt(v);
+        v += 0.001;
+    }
+    const uint64_t t1 = gettime();
+    v = 1.0;
+    for (int i = 0; i < 100000; i++) {
+        sink = sink + __ieee754_sqrt(v);
+        v += 0.001;
+    }
+    const uint64_t t2 = gettime();
+    printf("SQRT per call: util/GekkoSqrt %.3f us, newlib %.3f us (sqrt of a double)\n", (t1 - t0) / 40.5 / 100000.0, (t2 - t1) / 40.5 / 100000.0);
+}
+#endif
+
 } // namespace
 
 void RunTranslatedTest()
@@ -556,9 +619,18 @@ void RunTranslatedTest()
     char recording[] = "disc:/ttest/slime.jsonl";
     char prefab[] = "BabySlime";
 
+#if MLGC_TTEST_SQRT
+    CheckSqrt();
+#endif
+#if MLGC_TTEST_GC_AUTO
+    // The translated code, collecting as the game does: when enough was made since the last time.
+    printf("\nTTEST translated (enemy_translated_test, ML_GC_AUTO=1)\n");
+    setenv("ML_GC_AUTO", "1", 1);
+#else
     // The translated code, the collector at every frame end (the ctest slime_translated_gc; no poison).
     printf("\nTTEST translated (enemy_translated_test, ML_GC_EVERY_FRAME=1)\n");
     setenv("ML_GC_EVERY_FRAME", "1", 1);
+#endif
     StartTiming(recording);
 #if MLGC_TTEST_PROFILE
     StartSampler();
@@ -580,6 +652,7 @@ void RunTranslatedTest()
     // The hand port (slime_test: its self-checks, then the same replay).
     printf("\nTTEST hand port (slime_test)\n");
     unsetenv("ML_GC_EVERY_FRAME");
+    unsetenv("ML_GC_AUTO");
     StartTiming(recording);
     char name[] = "slime_test";
     char* argv[] = {name, recording, nullptr};

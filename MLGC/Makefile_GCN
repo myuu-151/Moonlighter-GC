@@ -90,6 +90,15 @@ endif
 ifneq ($(TTEST_PROFILE),)
 CFLAGS	+=	-DMLGC_TTEST_PROFILE=1
 endif
+# TTEST_GC_AUTO=1 (with TTEST): the translated replay collects when enough was made (as the game
+# does), not at every frame end. TTEST_SQRT=1: Moonlighter-Recomp's GekkoSqrt against newlib's on
+# every float in [1, 4) first.
+ifneq ($(TTEST_GC_AUTO),)
+CFLAGS	+=	-DMLGC_TTEST_GC_AUTO=1
+endif
+ifneq ($(TTEST_SQRT),)
+CFLAGS	+=	-DMLGC_TTEST_SQRT=1
+endif
 ifneq ($(TRANSLATED),)
 CFLAGS	+=	-DMLGC_TRANSLATED=1
 endif
@@ -194,8 +203,13 @@ GEN_SOURCES	:=	$(shell sed -n 's|.*/\([^/]*\.cpp\).*|\1|p' "$(ML_GEN)/sources.cm
 BIND_SOURCES	:=	$(notdir $(wildcard $(ML_SRC)/bind/*.cpp))
 OFILES	+=	$(addprefix gen_,$(GEN_SOURCES:.cpp=.o)) $(addprefix bind_,$(BIND_SOURCES:.cpp=.o))
 # Generated code: the untranslated methods' stubs leave parameters, locals and labels unused; C#'s
-# switches leave enum values out.
-GEN_CXXFLAGS	:=	-Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-label -Wno-switch
+# switches leave enum values out; cs_trace takes its fields' offsets (offsetof on classes with
+# virtual functions). Smaller code, the same results (Moonlighter-Recomp's tools/gcsize measures it):
+# the translated code runs on one thread, so its function-local statics (the string literals) need
+# no guard; and no IPA-SRA clones, which are local to each file (a copy of the same template
+# function in every file that calls it).
+GEN_CXXFLAGS	:=	-Wno-unused-parameter -Wno-unused-variable -Wno-unused-but-set-variable -Wno-unused-label -Wno-switch \
+				-Wno-invalid-offsetof -fno-threadsafe-statics -fno-ipa-sra
 
 gen_%.o: $(ML_GEN)/%.cpp
 	$(SILENTMSG) $(notdir $<)
@@ -222,7 +236,7 @@ endif
 # again, which links the program again. (With .SECONDARY, make skips a missing object whose source is
 # older than the program: a variant's own objects would be missed.)
 VARIANT_FILE	:=	$(DEPSDIR)/variant.txt
-VARIANT	:=	TRANSLATED=$(TRANSLATED) TTEST=$(TTEST) TTEST_PROFILE=$(TTEST_PROFILE)
+VARIANT	:=	TRANSLATED=$(TRANSLATED) TTEST=$(TTEST) TTEST_PROFILE=$(TTEST_PROFILE) TTEST_GC_AUTO=$(TTEST_GC_AUTO) TTEST_SQRT=$(TTEST_SQRT)
 $(shell [ "$$(cat $(VARIANT_FILE) 2>/dev/null)" = "$(VARIANT)" ] || echo "$(VARIANT)" > $(VARIANT_FILE))
 
 $(OUTPUT).dol: $(OUTPUT).elf
