@@ -61,6 +61,10 @@ endif
 ifneq ($(BREAKTEST),)
 CFLAGS	+=	-DMLGC_BREAKTEST
 endif
+# AUDIOLOG=1 (test builds): what the sound does, in Dolphin's log (Source/AudioGc.cpp, GameSound.cpp).
+ifneq ($(AUDIOLOG),)
+CFLAGS	+=	-DMLGC_AUDIOLOG
+endif
 # ENDROOM=1 (test builds): the floor starts in its room with the next-level door, Will walking at it.
 ifneq ($(ENDROOM),)
 CFLAGS	+=	-DMLGC_ENDROOM

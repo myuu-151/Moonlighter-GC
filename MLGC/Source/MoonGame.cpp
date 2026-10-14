@@ -27,7 +27,7 @@ using namespace game;
 
 // A test build's line in Dolphin's log (OSReport). Only in AUTOTOUR builds, which run in
 // Dolphin: on a console SYS_Report overwrites the RTC counter (Octave's System_Dolphin.cpp).
-#if defined(MLGC_AUTOTOUR) || defined(MLGC_AUTOWALK) || defined(MLGC_PADLOG) || defined(MLGC_ENDROOM) || defined(MLGC_BREAKTEST)
+#if defined(MLGC_AUTOTOUR) || defined(MLGC_AUTOWALK) || defined(MLGC_PADLOG) || defined(MLGC_ENDROOM) || defined(MLGC_BREAKTEST) || defined(MLGC_AUDIOLOG)
 #define TOUR_REPORT(...) SYS_Report(__VA_ARGS__)
 #else
 #define TOUR_REPORT(...) ((void)0)
@@ -66,6 +66,13 @@ void* ToRgb5a3(const RoomTexture& t, uint32_t& bytes)
 
 } // namespace
 
+// Free memory: the heap's free blocks and what the arena hasn't handed out yet.
+[[maybe_unused]] static unsigned FreeKb()
+{
+    const struct mallinfo info = mallinfo();
+    return (unsigned(info.fordblks) + unsigned((char*)SYS_GetArena1Hi() - (char*)SYS_GetArena1Lo())) / 1024;
+}
+
 MoonGame::MoonGame() = default;
 
 MoonGame::~MoonGame()
@@ -78,6 +85,10 @@ bool MoonGame::Initialize()
 {
     try {
         session_.Load();
+        // The sound (silent if the disc has none: the data made without it).
+        [[maybe_unused]] const unsigned freeBefore = FreeKb();
+        if (!sound_.Init(data_)) LogError("mlgc: no sound");
+        TOUR_REPORT("mlgc: the sound took %d KB of main memory to start\n", static_cast<int>(freeBefore) - static_cast<int>(FreeKb()));
         heroAnimator_ = unity::AnimatorController::FromJson(json::Parse(data_.Read("animators/hero_merchant.json")));
         // A new game's roll: the starting ability's cooldown; its weapon (the items, then they go).
         {
@@ -152,6 +163,13 @@ void MoonGame::NewFloor()
     brokenBreakables_.clear();
     floor_ = session_.Generate(culture, level_);
     deadEnemies_.clear();
+    // The dungeon's sound groups (DungeonGenerator.GenerateSounds; only when it changes).
+    {
+        [[maybe_unused]] const unsigned freeBefore = FreeKb();
+        sound_.EnterDungeon(data_, culture_);
+        TOUR_REPORT("mlgc: the %s dungeon's sound groups: %d KB of main memory\n", kCultureNames[culture_],
+                    static_cast<int>(freeBefore) - static_cast<int>(FreeKb()));
+    }
     if (bank_.Folder() != std::string("sprites/") + Session::PackName(culture) + "/") {
         bank_.Load(data_, std::string("sprites/") + Session::PackName(culture) + "/",
                    {"sprites/hero/", "sprites/weapons/broom_spear/", "sprites/enemies/BabySlime/", "sprites/enemies/GolemSoldier/", "sprites/enemies/Tangle/", "sprites/golem/", "sprites/forest/", "sprites/desert/", "sprites/tech/"});
@@ -203,6 +221,10 @@ void MoonGame::NewFloor()
             break;
         }
     }
+    // Entering the floor's first room: the dungeon's playlist (PlaylistManager.StartDungeonPlaylist)
+    // and its ambience (DungeonRoom: AmbientSoundManager.PlayDungeonMainAmbient).
+    sound_.StartDungeonPlaylist(level_, culture_);
+    sound_.PlayDungeonMainAmbient(culture_);
 }
 
 // Will's settings from his prefab (hero_merchant's HeroMerchant, in every pack) and the
@@ -219,11 +241,21 @@ void MoonGame::SetUpHero()
     for (size_t i = 0; i < layers.size(); i++)
         if (layers[i] == "Default") defaultLayer_ = static_cast<int>(i);
     hero_ = std::make_unique<HeroMerchantController>(heroAnimator_, s, physics_);
+    // His clips' sound events (HeroMerchantController's, SoundsWill's), after the controller's own.
+    {
+        auto own = hero_->animator.onEvent;
+        hero_->animator.onEvent = [this, own](const unity::AnimationEvent& e) {
+            if (own) own(e);
+            HeroEventSound(e.function);
+        };
+    }
     hero_->currentPlayerMoveSpeed = Constants::GetFloat("kBaseSpeed");
     hero_->SetDirection(HeroMerchantController::Front);
     // His weapon: its prefab (the items bundle's, in every pack) for the hitbox's defaults.
     if (const Prefab* w = weaponArt_.empty() ? nullptr : PrefabLibrary::Find(weaponArt_, "items")) {
         weapon_ = std::make_unique<Weapon>(weaponAnimator_, *w, WeaponTypeFromName(weaponType_));
+        // Its clips' sound events (the weapon's Sounds* component: SoundsBroom's).
+        weapon_->animator.onEvent = [this](const unity::AnimationEvent& e) { WeaponEventSound(e.function); };
         hero_->weapon = weapon_.get();
         hero_->stats.strength.Set(hero_->stats.strength.value + weaponStrength_);
         // The new game's potions: initialEquippedItems' consumables, stacked in the Potion slot.
@@ -232,6 +264,10 @@ void MoonGame::SetUpHero()
     } else if (!weaponArt_.empty()) {
         LogError("mlgc: no %s prefab in the pack: %s can't attack", weaponArt_.c_str(), weaponItem_.c_str());
     }
+    lastHealth_ = hero_->stats.currentHealth.value;
+    lastPotions_ = hero_->potion.quantity;
+    lastAbility_ = hero_->abilityAvailable;
+    lastDead_ = false;
 }
 
 void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
@@ -272,6 +308,8 @@ void MoonGame::EnterRoom(int cell, int from, const unity::Vector2* arrival)
     if (hero_) {
         RoomEnemies::Data d;
         for (int i = 0; i < 3; i++) d.controllers[i] = &enemyAnimators_[i];
+        d.audio = sound_.Game();
+        d.playSound = [this](const std::string& group) { sound_.Play(group); };
         d.enemyStats = &enemyStats_;
         d.physics = &physicsSettings_;
         enemies_ = std::make_unique<RoomEnemies>(d, *c.room, roomPos, physics_, *hero_, attack_, level_, culture_, deadEnemies_[cell]);
@@ -355,14 +393,18 @@ const MoonGame::GxTexture* MoonGame::SpriteTexture(const render::Sprite& s)
 }
 
 
-// Free memory: the heap's free blocks and what the arena hasn't handed out yet.
-[[maybe_unused]] static unsigned FreeKb()
+void MoonGame::Update(float deltaTime)
 {
-    const struct mallinfo info = mallinfo();
-    return (unsigned(info.fordblks) + unsigned((char*)SYS_GetArena1Hi() - (char*)SYS_GetArena1Lo())) / 1024;
+    sound_.BeginFrame(deltaTime);
+    UpdateGame(deltaTime);
+    sound_.LateUpdate();
+#ifdef MLGC_AUDIOLOG
+    static int audioFrames = 0;
+    if (++audioFrames % 300 == 0) SYS_Report("%s\n", sound_.StatsLine().c_str());
+#endif
 }
 
-void MoonGame::Update(float deltaTime)
+void MoonGame::UpdateGame(float deltaTime)
 {
     if (!floor_) return;
     try {
@@ -381,6 +423,7 @@ void MoonGame::Update(float deltaTime)
                 }
                 NewFloor();
                 TOUR_REPORT("mlgc: autotour %s floor %d, %u KB free\n", kCultureNames[culture_], level_ + 1, FreeKb());
+                TOUR_REPORT("mlgc: %s\n", sound_.StatsLine().c_str());
             }
         }
         return;
@@ -413,6 +456,7 @@ void MoonGame::Update(float deltaTime)
             return;
         }
         UpdateHero(deltaTime);
+        HeroSounds();
         if (hero_ && hero_->stats.isDead) {
             // The game pauses while he dies; when it's over, a new run (the town isn't here yet).
             if (hero_->deathAnimationEnded) {
@@ -708,20 +752,23 @@ void MoonGame::FindBreakables(const RoomFill& room, unity::Vector2 roomPos)
                 auto skins = beh.raw.find("skins");
                 if (skins != beh.raw.end() && skins->second.size() > 0 && skins->second[0].Find("broken"))
                     b.brokenSprite = skins->second[0]["broken"].s;
+                auto sound = beh.raw.find("enemyDeathSound");
+                if (sound != beh.raw.end() && sound->second.IsString()) b.breakSound = sound->second.s;
             }
         int k = 0;
         for (size_t q = 0; q < room_.quads.size() && b.quad < 0; q++)
             if (room_.quads[q].path.rfind(p + "/", 0) == 0 && room_.quads[q].sprite && k++ == nth) b.quad = static_cast<int>(q);
         breakables_.push_back(b);
-        if (std::find(broken.begin(), broken.end(), b.key) != broken.end()) Break(breakables_.back());
+        if (std::find(broken.begin(), broken.end(), b.key) != broken.end()) Break(breakables_.back(), false);
     }
 }
 
-// BreakableObjectBehaviour.BreakableDeath: the broken sprite, every collider off. Not yet: the
-// drops (DropObjects), the particles, the PolyNav obstacle.
-void MoonGame::Break(Breakable& b)
+// BreakableObjectBehaviour.BreakableDeath: the broken sprite, every collider off, its
+// enemyDeathSound. Not yet: the drops (DropObjects), the particles, the PolyNav obstacle.
+void MoonGame::Break(Breakable& b, bool sound)
 {
     b.broken = true;
+    if (sound && !b.breakSound.empty()) sound_.Play(b.breakSound);
     TOUR_REPORT("mlgc: broke %s\n", b.path.c_str());
     if (b.quad >= 0 && !b.brokenSprite.empty())
         if (const render::Sprite* s = bank_.Find(b.brokenSprite)) {
@@ -761,6 +808,53 @@ int MoonGame::HitBreakables()
         hits++;
     }
     return hits;
+}
+
+// The sounds the hero's scripts play (not his clips' events): HeroMerchant.DealDamageToPlayer's
+// will_damaged, Dash.UseAbility's will_roll, the potion's will_potion_used, and his death's
+// PlaylistManager.FadeOutAllMusic (PlayDeathAnimation).
+void MoonGame::HeroSounds()
+{
+    if (!hero_) return;
+    const float health = hero_->stats.currentHealth.value;
+    if (health < lastHealth_ && !hero_->stats.isDead) sound_.Play("will_damaged");
+    if (hero_->potion.quantity < lastPotions_) sound_.Play("will_potion_used");
+    if (lastAbility_ && !hero_->abilityAvailable) sound_.Play("will_roll");
+    if (hero_->stats.isDead && !lastDead_) sound_.FadeOutAllMusic();
+    lastHealth_ = health;
+    lastPotions_ = hero_->potion.quantity;
+    lastAbility_ = hero_->abilityAvailable;
+    lastDead_ = hero_->stats.isDead;
+}
+
+// His clips' events that play a sound (HeroMerchantController's and SoundsWill's methods).
+void MoonGame::HeroEventSound(const std::string& f)
+{
+    // HeroMerchantController.SetStepSound: WorldDungeonDoor.LoadDungeon's, by the dungeon.
+    static const char* const kSteps[5] = {"will_step_town_wood", "will_step_golem_dungeon", "will_step_forest_dungeon",
+                                          "will_step_desert_dungeon", "will_step_tech_dungeon"};
+    if (f == "PlayStepSound") sound_.Play(kSteps[culture_ >= 1 && culture_ <= 4 ? culture_ : 0]);
+    else if (f == "PlayDeathSound") sound_.Play("will_death");
+    else if (f == "PlayWillFall") sound_.Play("will_fall");
+    else if (f == "PlayShieldShown") sound_.Play("short_sword_secondary_attack_shield");
+    else if (f == "StartGlovesSecondaryAttackSoundFromAnimation") sound_.Play("gloves_secondary_attack_swing");
+    else if (f == "StartBigSwordSecondarySoundFromAnimation") sound_.Play("big_sword_secondary_attack_swing");
+    else if (f == "StopBigSwordSecondarySoundFromAnimation") sound_.StopGroup("big_sword_secondary_attack_swing");
+    else if (f == "PlayBowChargingSecondaryAttackSoundFromAnimation") sound_.Play("bow_secondary_attack_charge");
+    else if (f == "PlayTrickWeaponEnable") sound_.Play("trick_weapon_enable");
+    else if (f == "PlayTrickWeaponDisable") sound_.Play("trick_weapon_disable");
+}
+
+// The weapon's clips' events (SoundsBroom, the Broom Spear's).
+void MoonGame::WeaponEventSound(const std::string& f)
+{
+    if (f == "PlayBroomAttack") sound_.Play("spear_main_attack_swing");
+    else if (f == "PlayBroomAttack2") sound_.Play("spear_main_attack_swing2");
+    else if (f == "PlayBroomAttack3") sound_.Play("spear_main_attack_swing3");
+    else if (f == "PlayBroomLoop") sound_.Play("spear_secondary_loop");
+    else if (f == "PlayBroomFinish") sound_.Play("broom_secondary_finish");
+    else if (f == "PlayBroomCharged") sound_.Play("will_attack_charged");
+    else if (f == "PlayBroomCrash") sound_.Play("broom_secondary_crash");
 }
 
 void MoonGame::DrawRect(float x0, float y0, float x1, float y1, GXColor color)
